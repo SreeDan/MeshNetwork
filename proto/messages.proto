@@ -1,0 +1,14 @@
+syntax = "proto3";
+package mesh;
+
+enum EnvelopeType {
+  CUSTOM_TEXT = 0;
+}
+
+message Envelope {
+  string from = 1;
+  string to = 2; // Empty represents a broadcast message
+  string msg_id = 3;
+  bytes payload = 4; // Serialized message
+  EnvelopeType type = 5;
+}

@@ -3,6 +3,8 @@
 #include <iostream>
 #include <boost/asio.hpp>
 
+#include "RpcLayer.h"
+
 
 using namespace boost::asio;
 
@@ -13,7 +15,7 @@ static void write_frame(ip::tcp::socket &sock, const std::string &payload) {
 
     uint32_t len = htonl(static_cast<uint32_t>(payload.size()));
     std::vector<const_buffer> bufs;
-    bufs.push_back(buffer(&len, sizeof(len)));
+    bufs.emplace_back(buffer(&len, sizeof(len)));
     bufs.push_back(buffer(payload));
     boost::asio::write(sock, bufs);
 }
@@ -45,21 +47,22 @@ public:
         }
     }
 
-    void async_send_message(const std::string &message) override {
-        post(ioc_, [this, message]() {
+    void async_send_message(const mesh::Envelope &message) override {
+        std::string serialized_envelope = message.SerializeAsString();
+        post(ioc_, [this, serialized_envelope]() {
             try {
-                write_frame(socket_, message);
+                write_frame(socket_, serialized_envelope);
             } catch (std::exception &e) {
                 std::cerr << "failed to send message: " << e.what() << std::endl;
             }
         });
     }
 
-    std::string remote_addr() const override {
+    std::optional<std::string> remote_addr() const override {
         try {
             return socket_.remote_endpoint().address().to_string();
         } catch (...) {
-            return "";
+            return std::nullopt;
         }
     }
 
@@ -95,3 +98,8 @@ private:
         });
     }
 };
+
+std::shared_ptr<ISession> make_plain_session(io_context &ioc, ip::tcp::socket sock,
+                                             std::function<void(std::shared_ptr<ISession> session)> callback) {
+    return std::make_shared<PlainSession>(ioc, std::move(sock));
+}
