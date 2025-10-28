@@ -6,9 +6,10 @@ enum EnvelopeType {
 }
 
 message Envelope {
-  string from = 1;
-  string to = 2; // Empty represents a broadcast message
-  string msg_id = 3;
+  bytes msg_id = 1; // 16 raw bytes representing the UUID
+  string from = 2;
+  string to = 3; // Empty represents a broadcast message
   bytes payload = 4; // Serialized message
-  EnvelopeType type = 5;
+  bool expect_response = 5;
+  EnvelopeType type = 6;
 }
