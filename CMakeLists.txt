@@ -14,9 +14,11 @@ protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
 
 add_executable(MeshNetworking main.cpp
         src/node/mesh_node.cpp
-        src/net/session.h
         src/net/session.cpp
+        src/net/discovery.cpp
         src/rpc/RpcLayer.cpp
+        src/rpc/RpcManager.cpp
+        src/messages/EnvelopeUtils.cpp
         ${PROTO_SRCS}
         ${PROTO_HDRS}
 )
@@ -30,6 +32,7 @@ target_include_directories(MeshNetworking PRIVATE
         src/net
         src/node
         src/rpc
+        src/messages
 )
 
 target_link_libraries(MeshNetworking PRIVATE

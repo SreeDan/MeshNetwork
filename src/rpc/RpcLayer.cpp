@@ -10,11 +10,17 @@
 
 using namespace std::chrono_literals;
 
-RpcLayer::RpcLayer(boost::asio::io_context &ioc, SendFn sender)
-    : ioc_(ioc), send_fn_(std::move(sender)) {
+RpcConnection::RpcConnection(boost::asio::io_context &ioc, boost::asio::ip::tcp::socket sock)
+    : ioc_(ioc) {
+    auto self = shared_from_this();
+    session_ = make_plain_session(ioc, std::move(sock),
+                                  [self](const boost::uuids::uuid &msg_id, const std::string &payload) {
+                                      self->store_response(msg_id, payload);
+                                  });
+    // TODO: Eventually handle constructing a TLS session
 }
 
-RpcLayer::~RpcLayer() {
+RpcConnection::~RpcConnection() {
     std::lock_guard<std::mutex> guard(mu_);
     for (auto &[req_id, pending_req]: pending_requests_) {
         if (pending_req.timer) {
@@ -31,13 +37,12 @@ RpcLayer::~RpcLayer() {
     pending_requests_.clear();
 }
 
-RpcLayer::RpcLayer(RpcLayer &&other) noexcept
+RpcConnection::RpcConnection(RpcConnection &&other) noexcept
     : ioc_(other.ioc_),
-      send_fn_(std::move(other.send_fn_)),
       pending_requests_(std::move(other.pending_requests_)) {
 }
 
-RpcLayer &RpcLayer::operator=(RpcLayer &&other) noexcept {
+RpcConnection &RpcConnection::operator=(RpcConnection &&other) noexcept {
     if (this == &other) {
         return *this;
     }
@@ -58,16 +63,13 @@ RpcLayer &RpcLayer::operator=(RpcLayer &&other) noexcept {
     {
         // Move from other
         std::lock_guard<std::mutex> g(other.mu_);
-        send_fn_ = std::move(other.send_fn_);
         pending_requests_ = std::move(other.pending_requests_);
     }
 
     return *this;
 }
 
-
-std::future<std::string> RpcLayer::send_request(
-    const std::string &peer_addr,
+std::future<std::optional<std::string> > RpcConnection::send_request(
     const std::string &wrapped_req,
     std::chrono::milliseconds timeout) {
     static boost::uuids::random_generator generator;
@@ -80,14 +82,17 @@ std::future<std::string> RpcLayer::send_request(
     payload.append(req_id);
     payload.append(wrapped_req);
 
-    std::promise<std::string> promise;
+    std::promise<std::optional<std::string> > promise;
     auto fut = promise.get_future();
 
     auto timer = std::make_unique<boost::asio::steady_timer>(ioc_, timeout);
     auto time_ptr = timer.get();
     {
         std::lock_guard<std::mutex> guard(mu_);
-        pending_requests_[req_id] = Pending{std::move(promise), std::move(timer)};
+        pending_requests_[req_id] = Pending{
+            std::move(promise),
+            std::move(timer)
+        };
     }
 
     // timer expiration logic
@@ -111,26 +116,28 @@ std::future<std::string> RpcLayer::send_request(
         pending_requests_.erase(it);
     });
 
-
-    try {
-        send_fn_(peer_addr, payload);
-    } catch (...) {
-        receive_response(req_id, "");
-    }
+    // TODO: Make a whitelist of types where we know if it will capture a response or not
+    session_->async_send_message(req_id, payload);
 
     return fut;
 }
 
-void RpcLayer::receive_response(const std::string &req_id, const std::string &response) {
+std::future<std::optional<std::string> > RpcConnection::send_request(
+    const mesh::Envelope &envelope,
+    std::chrono::milliseconds timeout) {
+    return send_request(envelope.SerializeAsString(), timeout);
+}
+
+void RpcConnection::store_response(const boost::uuids::uuid &msg_id, const std::string &response) {
     std::lock_guard<std::mutex> guard(mu_);
-    if (pending_requests_.contains(req_id)) {
-        auto it = pending_requests_.find(req_id);
+    std::string str_id = boost::uuids::to_string(msg_id);
+    if (pending_requests_.contains(str_id)) {
+        auto it = pending_requests_.find(str_id);
         try {
             it->second.prom.set_value(response);
         } catch (...) {
-            std::cerr << "receive response failed for request " << req_id << std::endl;
+            std::cerr << "receive response failed for request " << str_id << std::endl;
         }
         pending_requests_.erase(it);
     }
 }
-

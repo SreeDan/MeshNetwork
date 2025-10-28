@@ -5,41 +5,46 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 
+#include "session.h"
+
 using namespace std::chrono_literals;
 
 struct Pending {
-    std::promise<std::string> prom;
+    std::promise<std::optional<std::string> > prom;
     std::unique_ptr<boost::asio::steady_timer> timer;
 };
 
-class RpcLayer {
+class RpcConnection : std::enable_shared_from_this<RpcConnection> {
 public:
-    using SendFn = std::function<void(const std::string &peer_addr, const std::string &payload)>;
+    RpcConnection(boost::asio::io_context &ioc, boost::asio::ip::tcp::socket sock);
 
-    RpcLayer(boost::asio::io_context &ioc, SendFn sender);
+    ~RpcConnection();
 
-    ~RpcLayer();
+    RpcConnection(RpcConnection &&other) noexcept;
 
-    RpcLayer(RpcLayer &&other) noexcept;
+    RpcConnection &operator=(RpcConnection &&other) noexcept;
 
-    RpcLayer &operator=(RpcLayer &&other) noexcept;
+    RpcConnection(const RpcConnection &other) = delete;
 
-    RpcLayer(const RpcLayer &other) = delete;
+    RpcConnection &operator=(const RpcConnection &other) = delete;
 
-    RpcLayer &operator=(const RpcLayer &other) = delete;
-
-    std::future<std::string> send_request(
-        const std::string &peer_addr,
+    std::future<std::optional<std::string> > send_request(
         const std::string &wrapped_req,
         std::chrono::milliseconds timeout = 3000ms
     );
 
-    void receive_response(const std::string &req_id, const std::string &resp_payload);
+    std::future<std::optional<std::string> > send_request(
+        const mesh::Envelope &envelope,
+        std::chrono::milliseconds timeout = 3000ms
+    );
+
+    void store_response(const boost::uuids::uuid &msg_id, const std::string &resp_payload);
 
 private:
     boost::asio::io_context &ioc_;
-    SendFn send_fn_;
+    // Guards pending_requests_
     std::mutex mu_;
     std::unordered_map<std::string, Pending> pending_requests_;
+    std::shared_ptr<ISession> session_;
 };
 
