@@ -12,7 +12,7 @@ using ReadMessageHandler = std::function<void(const boost::uuids::uuid &, const 
 struct ISession : std::enable_shared_from_this<ISession> {
     virtual ~ISession() = default;
 
-    virtual void start() = 0;
+    virtual boost::asio::ip::basic_endpoint<boost::asio::ip::tcp> start() = 0;
 
     virtual void stop() = 0;
 

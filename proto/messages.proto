@@ -2,14 +2,33 @@ syntax = "proto3";
 package mesh;
 
 enum EnvelopeType {
-  CUSTOM_TEXT = 0;
+  HANDSHAKE = 0;
+  CUSTOM_TEXT = 1;
+}
+
+message PeerIP {
+  string ip = 1;
+  int32 port = 2;
+}
+
+// Right now, can get this information from the remote address
+// of the boost socket. In the future, this may be useful for
+// implementing things like distributed hash tables or node discovery.
+message PeerRecord {
+  string peer_id = 1;
+  PeerIP peer_ip = 2;
+}
+
+message Handshake {
+  string proto_version = 1;
+  PeerRecord peer_record = 2;
 }
 
 message Envelope {
   bytes msg_id = 1; // 16 raw bytes representing the UUID
-  string from = 2;
-  string to = 3; // Empty represents a broadcast message
-  bytes payload = 4; // Serialized message
-  bool expect_response = 5;
-  EnvelopeType type = 6;
+  PeerIP from = 2; // ip and port
+  PeerIP to = 3; // ip and port of remote or empty represents a broadcast message
+  EnvelopeType type = 4;
+  bytes payload = 5; // Serialized message
+  bool expect_response = 6;
 }
