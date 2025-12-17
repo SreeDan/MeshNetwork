@@ -83,9 +83,9 @@ std::expected<std::future<std::string>, SendError> RpcManager::send_message(
 
     std::shared_ptr<RpcConnection> conn = it->second;
     if (timeout.has_value()) {
-        return conn->send_request(envelope, timeout.value());
+        return conn->send_message(envelope, timeout.value());
     } else {
-        return conn->send_request(envelope);
+        return conn->send_message(envelope);
     }
 }
 
@@ -120,7 +120,7 @@ void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
 
             auto env = mesh::envelope::MakeHeartbeatRequest(local_ip, remote_ip);
 
-            auto result = conn->send_request(env, timeout);
+            auto result = conn->send_message(env, timeout);
             futures.insert({peer, std::move(result)});
         }
 

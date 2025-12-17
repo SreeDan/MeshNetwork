@@ -36,7 +36,7 @@ public:
 
     std::expected<mesh::PeerRecord, std::string> send_handshake_request2();
 
-    std::future<std::string> send_request(
+    std::future<std::string> send_message(
         const mesh::Envelope &envelope,
         std::chrono::milliseconds timeout = 3000ms
     );
@@ -58,7 +58,7 @@ private:
 
     void on_message(const boost::uuids::uuid &msg_id, const std::string &payload);
 
-    void respond_to_request(const boost::uuids::uuid &msg_id, const mesh::Envelope &env);
+    void respond_to_message(const boost::uuids::uuid &msg_id, const mesh::Envelope &env);
 
     void store_response(const boost::uuids::uuid &msg_id, const std::string &resp_payload);
 };

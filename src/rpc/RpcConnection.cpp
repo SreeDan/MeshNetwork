@@ -66,7 +66,7 @@ std::expected<mesh::PeerRecord, std::string> RpcConnection::send_handshake_reque
     auto env = mesh::envelope::MakeHandshakeRequest(local_ip, remote_ip, peer_id_);
     std::cout << env.SerializeAsString().size() << std::endl;
     std::cout << "made the env" << std::endl;
-    std::future<std::string> fut_response = send_request(env);
+    std::future<std::string> fut_response = send_message(env);
 
     std::string response = fut_response.get();
     std::cout << "sent the req" << std::endl;
@@ -109,7 +109,7 @@ std::expected<mesh::PeerRecord, std::string> RpcConnection::send_handshake_reque
     remote_ip.set_port(remote_endpoint_.port());
 
     auto env = mesh::envelope::MakeHandshakeRequest(local_ip, remote_ip, peer_id_);
-    std::future<std::string> fut_response = send_request(env);
+    std::future<std::string> fut_response = send_message(env);
 
     try {
         std::string response = fut_response.get();
@@ -130,7 +130,7 @@ std::expected<mesh::PeerRecord, std::string> RpcConnection::send_handshake_reque
     }
 }
 
-std::future<std::string> RpcConnection::send_request(
+std::future<std::string> RpcConnection::send_message(
     const mesh::Envelope &envelope,
     std::chrono::milliseconds timeout) {
     std::string message_contents = envelope.SerializeAsString();
@@ -194,11 +194,11 @@ void RpcConnection::on_message(const boost::uuids::uuid &msg_id, const std::stri
     store_response(msg_id, payload);
     if (env.expect_response()) {
         // Incoming request from peer
-        respond_to_request(msg_id, env);
+        respond_to_message(msg_id, env);
     }
 }
 
-void RpcConnection::respond_to_request(const boost::uuids::uuid &msg_id, const mesh::Envelope &env) {
+void RpcConnection::respond_to_message(const boost::uuids::uuid &msg_id, const mesh::Envelope &env) {
     if (env.type() == mesh::EnvelopeType::HANDSHAKE && env.expect_response()) {
         std::cout << "performing response stuff\n";
         // Deserialize the request
