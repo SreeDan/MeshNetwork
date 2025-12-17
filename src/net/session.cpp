@@ -1,92 +1,77 @@
+#include "RpcConnection.h"
+
 #include <iostream>
 #include <boost/asio.hpp>
 #include <boost/uuid/uuid.hpp>
-#include "session.h"
-
+#include <optional>
 #include <boost/uuid/uuid_io.hpp>
 
-#include "RpcConnection.h"
-
+#include "async_writer.h"
+#include "session.h"
 
 using namespace boost::asio;
-
-static void write_frame(ip::tcp::socket &sock, const std::string &req_id, const std::string &payload) {
-    if (payload.size() > std::numeric_limits<uint32_t>::max()) {
-        throw std::length_error("payload too large");
-    }
-
-    std::cout << req_id << ": " << payload.size() << payload << std::endl;
-    uint32_t payload_len = htonl(static_cast<uint32_t>(payload.size()));
-    std::vector<const_buffer> bufs{
-        buffer(req_id, 16),
-        buffer(&payload_len, sizeof(uint32_t)),
-        buffer(payload)
-    };
-
-    boost::asio::write(sock, bufs);
-}
 
 class PlainSession : public ISession {
 public:
     PlainSession(io_context &ioc, ip::tcp::socket sock, ReadMessageHandler handler)
-        : socket_(std::move(sock)), ioc_(ioc), response_handler_(std::move(handler)) {
+        : socket_(std::move(sock)),
+          ioc_(ioc),
+          response_handler_(std::move(handler)),
+          write_queue_(std::make_shared<AsyncWriteQueue<ip::tcp::socket> >(socket_)) {
     }
 
-    PlainSession(PlainSession &&other) noexcept
-        : socket_(std::move(other.socket_)), ioc_(other.ioc_), response_handler_(std::move(other.response_handler_)) {
-    }
+    PlainSession(PlainSession &&other) noexcept = delete;
 
-    PlainSession &operator=(PlainSession &&other) noexcept {
-        if (this != &other) {
-            stop();
-            socket_ = std::move(other.socket_);
-            response_handler_ = std::move(other.response_handler_);
-        }
-        return *this;
-    }
+    PlainSession &operator=(PlainSession &&other) noexcept = delete;
 
     PlainSession(const PlainSession &) = delete;
 
     PlainSession &operator=(const PlainSession &) = delete;
 
     ~PlainSession() override {
-        stop();
+        PlainSession::stop();
     }
 
     ip::basic_endpoint<ip::tcp> start() override {
-        do_read_metadata();
+        do_read_header();
         return socket_.remote_endpoint();
     }
 
     void stop() override {
-        if (!socket_.is_open()) {
+        if (!socket_.is_open())
             return;
-        }
-        std::cerr << "[PlainSession] stop() called, closing socket to "
-                << socket_.remote_endpoint().address().to_string()
-                << ":" << socket_.remote_endpoint().port()
-                << std::endl;
+        if (write_queue_)
+            write_queue_->cancel();
+
         boost::system::error_code ec;
         socket_.shutdown(ip::tcp::socket::shutdown_both, ec);
         if (ec) {
             std::cerr << "failed to shutdown socket " << ec.message() << std::endl;
-            return;
         }
+
         socket_.close(ec);
         if (ec) {
             std::cerr << "failed to close socket " << ec.message() << std::endl;
-            return;
         }
     }
 
     void async_send_message(const std::string &req_id, const std::string &message) override {
-        post(ioc_, [this, message, req_id]() {
-            try {
-                write_frame(socket_, req_id, message);
-            } catch (std::exception &e) {
-                std::cerr << "failed to send message: " << e.what() << std::endl;
-            }
-        });
+        if (message.size() > std::numeric_limits<uint32_t>::max()) {
+            std::cerr << "payload too large" << std::endl;
+            return;
+        }
+
+        auto data = std::make_shared<std::vector<char> >();
+        data->reserve(16 + 4 * message.size());
+
+        data->insert(data->end(), req_id.begin(), req_id.end());
+        uint32_t payload_len = htonl(static_cast<uint32_t>(message.size()));
+        const char *len_ptr = reinterpret_cast<const char *>(&payload_len);
+
+        data->insert(data->end(), len_ptr, len_ptr + sizeof(payload_len));
+        data->insert(data->end(), message.begin(), message.end());
+        std::cout << "writing data to queue" << std::endl;
+        write_queue_->write(std::move(data));
     }
 
     std::optional<std::string> remote_addr() const override {
@@ -101,47 +86,55 @@ private:
     ip::tcp::socket socket_;
     io_context &ioc_;
     std::function<void(const boost::uuids::uuid &, const std::string &)> response_handler_;
+    std::shared_ptr<AsyncWriteQueue<ip::tcp::socket> > write_queue_;
 
-    void do_read_metadata() {
+    void do_read_header() {
         auto self = shared_from_this();
-        auto buf = std::make_shared<std::array<char, 20> >();
-        async_read(socket_, buffer(*buf), [this, self, buf](boost::system::error_code ec, std::size_t) {
-            if (ec) {
-                std::cerr << "[do_read_metadata] async_read error: " << ec.message()
-                        << " (" << ec.value() << ")" << std::endl;
-                return;
-            }
+        // Buffer for the header (UUID + Len)
+        auto header_buf = std::make_shared<std::array<char, 20> >();
+        async_read(socket_, buffer(*header_buf),
+                   [this, self, header_buf](boost::system::error_code ec, std::size_t) {
+                       if (ec) {
+                           if (ec != boost::asio::error::eof)
+                               std::cerr << "[session] Read header failed: " << ec.message() << std::endl;
+                           stop();
+                           return;
+                       }
 
-            std::cout << "incoming something idk what yet" << std::endl;
-            // format of message is [ 16 bytes UUID ][ 4 bytes length ][ N bytes payload ]
+                       boost::uuids::uuid msg_id{};
+                       uint32_t len;
 
-            boost::uuids::uuid msg_id;
-            uint32_t len;
+                       memcpy(msg_id.data, header_buf->data(), 16);
+                       memcpy(&len, header_buf->data() + 16, 4);
+                       len = ntohl(len);
 
-            std::memcpy(msg_id.data, buf->data(), 16);
-            // Copy length (starts after 16 bytes)
-            std::memcpy(&len, buf->data() + 16, 4);
-            len = ntohl(len);
+                       if (len > 10 * 1024 * 1024) {
+                           // 10MB limit
+                           std::cerr << "[session] Oversized message: " << len << std::endl;
+                           stop();
+                           return;
+                       }
 
-            do_read_payload(msg_id, len);
-        });
+                       do_read_payload(msg_id, len);
+                   });
     }
 
-    void do_read_payload(boost::uuids::uuid msg_id, uint32_t n) {
-        std::cout << "reading payload of " << boost::uuids::to_string(msg_id) << " " << n << std::endl;
+    void do_read_payload(boost::uuids::uuid msg_id, uint32_t len) {
         auto self = shared_from_this();
-        auto payload = std::make_shared<std::vector<char> >(n);
-        async_read(socket_, buffer(*payload), [this, self, payload, msg_id](boost::system::error_code ec, std::size_t) {
-            if (ec) {
-                std::cerr << "failed to read payload message: " << ec.message() << std::endl;
-                return;
-            }
+        auto payload = std::make_shared<std::vector<char> >(len);
+        async_read(socket_, buffer(*payload),
+                   [this ,self, payload, msg_id](boost::system::error_code ec, std::size_t) {
+                       if (ec) {
+                           std::cerr << "[session] Read payload failed: " << ec.message() << std::endl;
+                           stop();
+                           return;
+                       }
 
-            response_handler_(msg_id, std::string(payload->data(), payload->size()));
+                       response_handler_(msg_id, std::string(payload->data(), payload->size()));
 
-            // read the next message
-            do_read_metadata();
-        });
+                       // read the next message
+                       do_read_header();
+                   });
     }
 };
 

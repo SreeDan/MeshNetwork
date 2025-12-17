@@ -8,7 +8,7 @@ enum SendError {
     INVALID_PEER,
 };
 
-class RpcManager {
+class RpcManager : public std::enable_shared_from_this<RpcManager> {
 public:
     RpcManager(boost::asio::io_context &ioc, const std::string &peer_id);
 
@@ -17,7 +17,8 @@ public:
     std::expected<std::string, std::string> create_connection(const std::string &remote_addr,
                                                               boost::asio::ip::tcp::socket sock);
 
-    void accept_connection(const std::string &remote_addr, boost::asio::ip::tcp::socket sock);
+    void accept_connection(const std::string &remote_addr,
+                           boost::asio::ip::tcp::socket sock);
 
     bool remove_connection(std::string peer_id);
 

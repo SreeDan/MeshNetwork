@@ -1,4 +1,5 @@
 #pragma once
+#include <expected>
 #include <future>
 #include <string>
 #include <boost/asio/io_context.hpp>
@@ -29,7 +30,11 @@ public:
 
     RpcConnection &operator=(const RpcConnection &other) = delete;
 
-    void start();
+    std::expected<mesh::PeerRecord, std::string> start(bool initiator);
+
+    std::expected<mesh::PeerRecord, std::string> send_handshake_request();
+
+    std::expected<mesh::PeerRecord, std::string> send_handshake_request2();
 
     std::future<std::string> send_request(
         const mesh::Envelope &envelope,
@@ -43,6 +48,8 @@ public:
 private:
     boost::asio::io_context &ioc_;
     boost::asio::ip::tcp::socket sock_;
+
+    std::shared_ptr<std::promise<std::expected<mesh::PeerRecord, std::string> > > handshake_promise_;
 
     // Guards pending_requests_
     std::mutex mu_;

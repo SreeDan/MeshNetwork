@@ -29,9 +29,8 @@ private:
     boost::asio::ip::tcp::acceptor acceptor_;
     Discovery discovery_;
 
-    RpcManager rpc_connections;
+    std::shared_ptr<RpcManager> rpc_connections;
 
-    // std::vector<std::shared_ptr<ISession> > sessions_;
     std::mutex mu_;
 
     void do_accept();

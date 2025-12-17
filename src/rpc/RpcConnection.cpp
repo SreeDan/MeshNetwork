@@ -1,14 +1,13 @@
 #include "RpcConnection.h"
 
+#include <expected>
 #include <iostream>
 #include <utility>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
 #include "EnvelopeUtils.h"
-
 
 using namespace std::chrono_literals;
 
@@ -35,50 +34,101 @@ RpcConnection::~RpcConnection() {
     pending_requests_.clear();
 }
 
-// RpcConnection::RpcConnection(RpcConnection &&other) noexcept
-//     : ioc_(other.ioc_), sock_(std::move(other.sock_)),
-//       pending_requests_(std::move(other.pending_requests_)) {
-// }
-//
-// RpcConnection &RpcConnection::operator=(RpcConnection &&other) noexcept {
-//     if (this == &other) {
-//         return *this;
-//     }
-//
-//     for (auto &[req_id, pending_req]: pending_requests_) {
-//         if (pending_req.timer) {
-//             boost::system::error_code ec;
-//             pending_req.timer->cancel(ec);
-//         }
-//
-//         try {
-//             pending_req.prom.set_exception(
-//                 std::make_exception_ptr(std::runtime_error("RpcLayer moved")));
-//         } catch (...) {
-//         }
-//     }
-//
-//     {
-//         // Move from other
-//         std::lock_guard<std::mutex> g(other.mu_);
-//         pending_requests_ = std::move(other.pending_requests_);
-//         sock_ = std::move(other.sock_);
-//     }
-//
-//     return *this;
-// }
-
-void RpcConnection::start() {
+std::expected<mesh::PeerRecord, std::string> RpcConnection::start(bool initiator) {
     auto self = shared_from_this();
+    handshake_promise_ = std::make_shared<std::promise<std::expected<mesh::PeerRecord, std::string> > >();
     session_ = make_plain_session(ioc_, std::move(sock_),
                                   [self](const boost::uuids::uuid &msg_id, const std::string &payload) {
                                       self->on_message(msg_id, payload);
                                   });
     std::cout << "starting session layer\n";
-    // TODO: Eventually handle constructing a TLS session
     session_->start();
+
+    if (initiator) {
+        // If we are the initiator, we actively send and wait for a reply
+        return send_handshake_request();
+    } else {
+        // If we are the acceptor, we simply wait for the remote to send us a handshake
+        // This .get() blocks this thread until on_message sets the promise.
+        return handshake_promise_->get_future().get();
+    }
 }
 
+std::expected<mesh::PeerRecord, std::string> RpcConnection::send_handshake_request() {
+    mesh::PeerIP local_ip;
+    local_ip.set_ip(local_endpoint_.address().to_string());
+    local_ip.set_port(local_endpoint_.port());
+
+    mesh::PeerIP remote_ip;
+    remote_ip.set_ip(remote_endpoint_.address().to_string());
+    remote_ip.set_port(remote_endpoint_.port());
+
+    auto env = mesh::envelope::MakeHandshakeRequest(local_ip, remote_ip, peer_id_);
+    std::cout << env.SerializeAsString().size() << std::endl;
+    std::cout << "made the env" << std::endl;
+    std::future<std::string> fut_response = send_request(env);
+
+    std::string response = fut_response.get();
+    std::cout << "sent the req" << std::endl;
+    mesh::Envelope response_envelope;
+    if (!response_envelope.ParseFromString(response))
+        return std::unexpected("failed to parse handshake response envelope");
+
+    // Not the correct response
+    if (response_envelope.type() != mesh::EnvelopeType::HANDSHAKE || response_envelope.expect_response() == true)
+        return std::unexpected("invalid handshake response: " + response);
+
+    mesh::Handshake handshake_response;
+    if (!handshake_response.ParseFromString(response_envelope.payload())) {
+        return std::unexpected("failed to parse handshake in response");
+    }
+
+    if (handshake_response.proto_version() != mesh::MeshVersion) {
+        std::ostringstream oss;
+        oss << "mesh protobuf versions don't match, expected: "
+                << mesh::MeshVersion << ", received: " << handshake_response.proto_version();
+        return std::unexpected(oss.str());
+    }
+
+    // Sanity check ip address and port
+    mesh::PeerRecord rec = handshake_response.peer_record();
+    if (rec.peer_ip().ip() != remote_ip.ip() || rec.peer_ip().port() != remote_endpoint_.port()) {
+        return std::unexpected("IP response of remote is different than expected");
+    }
+
+    return rec;
+}
+
+std::expected<mesh::PeerRecord, std::string> RpcConnection::send_handshake_request2() {
+    mesh::PeerIP local_ip;
+    local_ip.set_ip(local_endpoint_.address().to_string());
+    local_ip.set_port(local_endpoint_.port());
+
+    mesh::PeerIP remote_ip;
+    remote_ip.set_ip(remote_endpoint_.address().to_string());
+    remote_ip.set_port(remote_endpoint_.port());
+
+    auto env = mesh::envelope::MakeHandshakeRequest(local_ip, remote_ip, peer_id_);
+    std::future<std::string> fut_response = send_request(env);
+
+    try {
+        std::string response = fut_response.get();
+
+        mesh::Envelope response_envelope;
+        if (!response_envelope.ParseFromString(response))
+            return std::unexpected("failed to parse handshake response envelope");
+        if (response_envelope.type() != mesh::EnvelopeType::HANDSHAKE)
+            return std::unexpected("invalid handshake response type");
+
+        mesh::Handshake handshake_response;
+        if (!handshake_response.ParseFromString(response_envelope.payload()))
+            return std::unexpected("failed to parse handshake payload");
+
+        return handshake_response.peer_record();
+    } catch (std::exception &e) {
+        return std::unexpected(std::string("Handshake error: ") + e.what());
+    }
+}
 
 std::future<std::string> RpcConnection::send_request(
     const mesh::Envelope &envelope,
@@ -96,38 +146,38 @@ std::future<std::string> RpcConnection::send_request(
     if (envelope.expect_response()) {
         // Only put the promise in pending_requests_ if we expect a response
         // because if we don't expect a response we won't ever get a response.
-        {
+        std::lock_guard<std::mutex> guard(mu_);
+        pending_requests_[req_id] = Pending{
+            std::move(promise),
+            std::move(timer)
+        };
+
+        // timer expiration logic
+        time_ptr->async_wait([this, req_id](const boost::system::error_code &ec) {
+            if (ec == boost::asio::error::operation_aborted) {
+                // timer was canceled, meaning the response did not time out
+                return;
+            }
+
             std::lock_guard<std::mutex> guard(mu_);
-            pending_requests_[req_id] = Pending{
-                std::move(promise),
-                std::move(timer)
-            };
-        }
+            auto it = pending_requests_.find(req_id);
+            if (it == pending_requests_.end()) {
+                return;
+            }
+
+            try {
+                it->second.prom.set_exception(
+                    // TODO: Make it a known exception I can explicitly handle
+                    std::make_exception_ptr(std::runtime_error("RPC failed: timeout")));
+            } catch (...) {
+            }
+            pending_requests_.erase(it);
+        });
+    } else {
+        promise.set_value("");
     }
 
-    // timer expiration logic
-    time_ptr->async_wait([this, req_id](const boost::system::error_code &ec) {
-        if (ec == boost::asio::error::operation_aborted) {
-            // timer was cancelled, meaning the response did not time out
-            return;
-        }
-
-        std::lock_guard<std::mutex> guard(mu_);
-        auto it = pending_requests_.find(req_id);
-        if (it == pending_requests_.end()) {
-            return;
-        }
-
-        try {
-            it->second.prom.set_exception(
-                std::make_exception_ptr(std::runtime_error("RPC failed: timeout")));
-        } catch (...) {
-        }
-        pending_requests_.erase(it);
-    });
-
     session_->async_send_message(req_id, message_contents);
-
     return fut;
 }
 
@@ -141,12 +191,10 @@ void RpcConnection::on_message(const boost::uuids::uuid &msg_id, const std::stri
 
     std::cout << "on message reached: " << payload << std::endl;
 
+    store_response(msg_id, payload);
     if (env.expect_response()) {
         // Incoming request from peer
         respond_to_request(msg_id, env);
-    } else {
-        // Incoming response to our earlier request
-        store_response(msg_id, payload);
     }
 }
 
@@ -164,16 +212,28 @@ void RpcConnection::respond_to_request(const boost::uuids::uuid &msg_id, const m
         local_ip.set_ip(local_endpoint_.address().to_string());
         local_ip.set_port(local_endpoint_.port());
 
-        // Construct handshake response
         auto response = mesh::envelope::MakeHandshakeResponse(local_ip, env.from(), peer_id_);
         response.set_msg_id(env.msg_id());
 
-        std::string req_id = response.msg_id();
-        // Send response
-        session_->async_send_message(req_id, response.SerializeAsString());
+        session_->async_send_message(response.msg_id(), response.SerializeAsString());
+
+        if (handshake_promise_) {
+            try {
+                handshake_promise_->set_value(handshake_req.peer_record());
+            } catch (...) {
+            }
+        }
+    } else if (env.type() == mesh::EnvelopeType::HEARTBEAT && env.expect_response()) {
+        mesh::PeerIP local_ip;
+        local_ip.set_ip(local_endpoint_.address().to_string());
+        local_ip.set_port(local_endpoint_.port());
+
+        auto response = mesh::envelope::MakeHeartbeatResponse(local_ip, env.from());
+        response.set_msg_id(env.msg_id());
+
+        session_->async_send_message(response.msg_id(), response.SerializeAsString());
     }
 }
-
 
 void RpcConnection::store_response(const boost::uuids::uuid &msg_id, const std::string &response) {
     std::lock_guard<std::mutex> guard(mu_);
