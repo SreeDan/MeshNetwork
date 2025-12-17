@@ -3,7 +3,8 @@ package mesh;
 
 enum EnvelopeType {
   HANDSHAKE = 0;
-  CUSTOM_TEXT = 1;
+  HEARTBEAT = 1;
+  CUSTOM_TEXT = 2;
 }
 
 message PeerIP {

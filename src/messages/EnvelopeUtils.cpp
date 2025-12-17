@@ -74,5 +74,31 @@ namespace mesh {
             e.set_expect_response(false);
             return e;
         }
+
+        Envelope MakeHeartbeatRequest(const PeerIP &from,
+                                      const PeerIP &to) {
+            Envelope e;
+            e.set_msg_id(gen_uuid().data, 16);
+            *e.mutable_from() = from;
+            *e.mutable_to() = to;
+
+            *e.mutable_payload() = "";
+            e.set_type(mesh::HEARTBEAT);
+            e.set_expect_response(true);
+            return e;
+        }
+
+        Envelope MakeHeartbeatResponse(const PeerIP &from,
+                                       const PeerIP &to) {
+            Envelope e;
+            e.set_msg_id(gen_uuid().data, 16);
+            *e.mutable_from() = from;
+            *e.mutable_to() = to;
+
+            *e.mutable_payload() = "";
+            e.set_type(mesh::HEARTBEAT);
+            e.set_expect_response(false);
+            return e;
+        }
     }
 }

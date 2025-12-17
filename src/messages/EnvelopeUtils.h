@@ -28,6 +28,16 @@ namespace mesh {
             const PeerIP &to,
             const std::string &peer_id
         );
+
+        Envelope MakeHeartbeatRequest(
+            const PeerIP &from,
+            const PeerIP &to
+        );
+
+        Envelope MakeHeartbeatResponse(
+            const PeerIP &from,
+            const PeerIP &to
+        );
     }
 }
 
