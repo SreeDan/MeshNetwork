@@ -6,6 +6,8 @@
 
 RpcManager::RpcManager(boost::asio::io_context &ioc, const std::string &peer_id)
     : ioc_(ioc), peer_id_(peer_id) {
+    using namespace std::chrono_literals;
+    heartbeat_thread_ = std::thread([this] { send_heartbeats(300ms); });
 }
 
 RpcManager::~RpcManager() {
@@ -84,5 +86,58 @@ std::expected<std::future<std::string>, SendError> RpcManager::send_message(
         return conn->send_request(envelope, timeout.value());
     } else {
         return conn->send_request(envelope);
+    }
+}
+
+void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
+    using namespace std::chrono_literals;
+    while (true) {
+        std::vector<std::string> peers;
+        {
+            std::lock_guard<std::mutex> guard(mu_);
+            peers.reserve(connections_.size());
+            for (const auto &[peer_id, _]: connections_) {
+                peers.push_back(peer_id);
+            }
+        }
+
+        std::unordered_map<std::string, std::future<std::string> > futures;
+        for (const auto &peer: peers) {
+            std::lock_guard<std::mutex> guard(mu_);
+            auto it = connections_.find(peer);
+            if (it == connections_.end())
+                continue;
+
+            std::shared_ptr<RpcConnection> conn = it->second;
+
+            mesh::PeerIP local_ip;
+            local_ip.set_ip(conn->local_endpoint_.address().to_string());
+            local_ip.set_port(conn->local_endpoint_.port());
+
+            mesh::PeerIP remote_ip;
+            remote_ip.set_ip(conn->remote_endpoint_.address().to_string());
+            remote_ip.set_port(conn->remote_endpoint_.port());
+
+            auto env = mesh::envelope::MakeHeartbeatRequest(local_ip, remote_ip);
+
+            auto result = conn->send_request(env, timeout);
+            futures.insert({peer, std::move(result)});
+        }
+
+        for (auto &pair: futures) {
+            std::string peer = pair.first;
+            std::future<std::string> fut = std::move(pair.second);
+            try {
+                fut.get();
+                std::cout << "successful heartbeat with " << peer << std::endl;
+            } catch (const std::exception &e) {
+                std::cerr << e.what() << std::endl;
+                std::lock_guard<std::mutex> guard(mu_);
+                connections_.erase(peer);
+                std::cout << "failed heartbeat with " << peer << ", removing connection" << std::endl;
+            }
+        }
+
+        std::this_thread::sleep_for(3s);
     }
 }

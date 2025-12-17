@@ -33,4 +33,7 @@ private:
     const std::string &peer_id_;
     std::mutex mu_;
     std::unordered_map<std::string, std::shared_ptr<RpcConnection> > connections_;
+    std::thread heartbeat_thread_;
+
+    void send_heartbeats(std::chrono::milliseconds timeout);
 };
