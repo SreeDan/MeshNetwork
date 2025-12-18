@@ -54,59 +54,28 @@ std::expected<mesh::PeerRecord, std::string> RpcConnection::start(bool initiator
     }
 }
 
-std::expected<mesh::PeerRecord, std::string> RpcConnection::send_handshake_request() {
-    mesh::PeerIP local_ip;
-    local_ip.set_ip(local_endpoint_.address().to_string());
-    local_ip.set_port(local_endpoint_.port());
 
-    mesh::PeerIP remote_ip;
-    remote_ip.set_ip(remote_endpoint_.address().to_string());
-    remote_ip.set_port(remote_endpoint_.port());
-
-    auto env = mesh::envelope::MakeHandshakeRequest(local_ip, remote_ip, peer_id_);
-    std::cout << env.SerializeAsString().size() << std::endl;
-    std::cout << "made the env" << std::endl;
-    std::future<std::string> fut_response = send_message(env);
-
-    std::string response = fut_response.get();
-    std::cout << "sent the req" << std::endl;
-    mesh::Envelope response_envelope;
-    if (!response_envelope.ParseFromString(response))
-        return std::unexpected("failed to parse handshake response envelope");
-
-    // Not the correct response
-    if (response_envelope.type() != mesh::EnvelopeType::HANDSHAKE || response_envelope.expect_response() == true)
-        return std::unexpected("invalid handshake response: " + response);
-
-    mesh::Handshake handshake_response;
-    if (!handshake_response.ParseFromString(response_envelope.payload())) {
-        return std::unexpected("failed to parse handshake in response");
-    }
-
-    if (handshake_response.proto_version() != mesh::MeshVersion) {
-        std::ostringstream oss;
-        oss << "mesh protobuf versions don't match, expected: "
-                << mesh::MeshVersion << ", received: " << handshake_response.proto_version();
-        return std::unexpected(oss.str());
-    }
-
-    // Sanity check ip address and port
-    mesh::PeerRecord rec = handshake_response.peer_record();
-    if (rec.peer_ip().ip() != remote_ip.ip() || rec.peer_ip().port() != remote_endpoint_.port()) {
-        return std::unexpected("IP response of remote is different than expected");
-    }
-
-    return rec;
+void RpcConnection::set_on_dispatch(std::function<void(std::shared_ptr<RpcConnection>, const mesh::Envelope &)> cb) {
+    handler_cb_ = cb;
 }
 
-std::expected<mesh::PeerRecord, std::string> RpcConnection::send_handshake_request2() {
+mesh::PeerIP RpcConnection::get_local_peer_ip() {
     mesh::PeerIP local_ip;
     local_ip.set_ip(local_endpoint_.address().to_string());
     local_ip.set_port(local_endpoint_.port());
+    return local_ip;
+}
 
+mesh::PeerIP RpcConnection::get_remote_peer_ip() {
     mesh::PeerIP remote_ip;
     remote_ip.set_ip(remote_endpoint_.address().to_string());
     remote_ip.set_port(remote_endpoint_.port());
+    return remote_ip;
+}
+
+std::expected<mesh::PeerRecord, std::string> RpcConnection::send_handshake_request() {
+    mesh::PeerIP local_ip = get_local_peer_ip();
+    mesh::PeerIP remote_ip = get_remote_peer_ip();
 
     auto env = mesh::envelope::MakeHandshakeRequest(local_ip, remote_ip, peer_id_);
     std::future<std::string> fut_response = send_message(env);
@@ -177,6 +146,11 @@ std::future<std::string> RpcConnection::send_message(
         promise.set_value("");
     }
 
+    mesh::PeerIP self_peer = get_local_peer_ip();
+    if (self_peer.ip() == envelope.to().ip() && self_peer.port() == envelope.to().port()) {
+        std::cout << "warning: sending message to itself" << std::endl;
+    }
+
     session_->async_send_message(req_id, message_contents);
     return fut;
 }
@@ -192,9 +166,10 @@ void RpcConnection::on_message(const boost::uuids::uuid &msg_id, const std::stri
     std::cout << "on message reached: " << payload << std::endl;
 
     store_response(msg_id, payload);
-    if (env.expect_response()) {
+    if (handler_cb_) {
+        std::cout << "calling dispatcher" << std::endl;
         // Incoming request from peer
-        respond_to_message(msg_id, env);
+        handler_cb_(shared_from_this(), env);
     }
 }
 
@@ -251,5 +226,15 @@ void RpcConnection::store_response(const boost::uuids::uuid &msg_id, const std::
             std::cerr << "receive response failed for request " << boost::uuids::to_string(msg_id) << std::endl;
         }
         pending_requests_.erase(it);
+    }
+}
+
+void RpcConnection::fulfill_handshake_promise(const mesh::PeerRecord &record) {
+    if (handshake_promise_) {
+        try {
+            handshake_promise_->set_value(record);
+        } catch (std::exception &e) {
+            std::cerr << "failed to set handshake promise value: " << e.what() << std::endl;
+        }
     }
 }

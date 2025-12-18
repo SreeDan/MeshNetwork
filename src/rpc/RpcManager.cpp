@@ -6,8 +6,14 @@
 
 RpcManager::RpcManager(boost::asio::io_context &ioc, const std::string &peer_id)
     : ioc_(ioc), peer_id_(peer_id) {
+    register_handlers();
     using namespace std::chrono_literals;
     heartbeat_thread_ = std::thread([this] { send_heartbeats(300ms); });
+}
+
+void RpcManager::register_handlers() {
+    handlers_[mesh::EnvelopeType::HANDSHAKE] = std::make_unique<HandshakeHandler>();
+    handlers_[mesh::EnvelopeType::HEARTBEAT] = std::make_unique<HeartbeatHandler>();
 }
 
 RpcManager::~RpcManager() {
@@ -24,6 +30,9 @@ std::expected<std::string, std::string> RpcManager::create_connection(const std:
     auto local_endpoint = sock.local_endpoint();
     auto rpc_connection = std::make_shared<RpcConnection>(ioc_, std::move(sock), peer_id_, local_endpoint,
                                                           remote_ep);
+    rpc_connection->set_on_dispatch([this](auto conn, const auto &env) {
+        this->dispatch_message(conn, env);
+    });
 
     // Safe to block the main thread while waiting for a handshake
     auto res = rpc_connection->start(true); // Blocking call
@@ -41,6 +50,9 @@ void RpcManager::accept_connection(const std::string &remote_addr, boost::asio::
     auto local_ep = sock.local_endpoint();
 
     auto rpc_connection = std::make_shared<RpcConnection>(ioc_, std::move(sock), peer_id_, local_ep, remote_ep);
+    rpc_connection->set_on_dispatch([this](auto conn, const auto &env) {
+        this->dispatch_message(conn, env);
+    });
 
     // Spawning in a new thread because we don't want to block here
     std::thread([this, rpc_connection]() {
@@ -90,6 +102,7 @@ std::expected<std::future<std::string>, SendError> RpcManager::send_message(
 }
 
 void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
+    // maybe change to 5 consecutive failures -> then drop the connection
     using namespace std::chrono_literals;
     while (true) {
         std::vector<std::string> peers;
@@ -138,6 +151,14 @@ void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
             }
         }
 
-        std::this_thread::sleep_for(3s);
+        std::this_thread::sleep_for(10s);
+        std::cout << "heartbeat thread woke back up" << std::endl;
     }
 }
+
+void RpcManager::dispatch_message(std::shared_ptr<RpcConnection> conn, const mesh::Envelope &envelope) {
+    auto it = handlers_.find(envelope.type());
+    if (it != handlers_.end()) {
+        it->second->handle(conn, envelope);
+    }
+};

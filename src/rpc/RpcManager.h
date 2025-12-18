@@ -2,7 +2,10 @@
 #include <expected>
 #include <boost/asio/io_service.hpp>
 
+#include "IMessageHandler.h"
 #include "RpcConnection.h"
+#include "handlers/HandshakeHandler.h"
+#include "handlers/HeartbeatHandler.h"
 
 enum SendError {
     INVALID_PEER,
@@ -28,12 +31,18 @@ public:
                                                                     std::optional<std::chrono::milliseconds> timeout =
                                                                             std::nullopt);
 
+    void send_heartbeats(std::chrono::milliseconds timeout);
+
 private:
     boost::asio::io_context &ioc_;
     const std::string &peer_id_;
     std::mutex mu_;
     std::unordered_map<std::string, std::shared_ptr<RpcConnection> > connections_;
     std::thread heartbeat_thread_;
+    std::unordered_map<mesh::EnvelopeType, std::unique_ptr<IMessageHandler> > handlers_;
 
-    void send_heartbeats(std::chrono::milliseconds timeout);
+    void register_handlers();
+
+
+    void dispatch_message(std::shared_ptr<RpcConnection> conn, const mesh::Envelope &envelope);
 };

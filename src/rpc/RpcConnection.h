@@ -34,16 +34,22 @@ public:
 
     std::expected<mesh::PeerRecord, std::string> send_handshake_request();
 
-    std::expected<mesh::PeerRecord, std::string> send_handshake_request2();
-
     std::future<std::string> send_message(
         const mesh::Envelope &envelope,
         std::chrono::milliseconds timeout = 3000ms
     );
 
+    mesh::PeerIP get_local_peer_ip();
+
+    mesh::PeerIP get_remote_peer_ip();
+
+    void set_on_dispatch(std::function<void(std::shared_ptr<RpcConnection>, const mesh::Envelope &)> cb);
+
+    void fulfill_handshake_promise(const mesh::PeerRecord &record);
+
+    const std::string &peer_id_;
     boost::asio::ip::basic_endpoint<boost::asio::ip::tcp> local_endpoint_;
     boost::asio::ip::basic_endpoint<boost::asio::ip::tcp> remote_endpoint_;
-    const std::string &peer_id_;
 
 private:
     boost::asio::io_context &ioc_;
@@ -55,6 +61,7 @@ private:
     std::mutex mu_;
     std::unordered_map<std::string, Pending> pending_requests_;
     std::shared_ptr<ISession> session_;
+    std::function<void(std::shared_ptr<RpcConnection>, const mesh::Envelope &)> handler_cb_;
 
     void on_message(const boost::uuids::uuid &msg_id, const std::string &payload);
 
