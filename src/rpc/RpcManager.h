@@ -11,6 +11,10 @@ enum SendError {
     INVALID_PEER,
 };
 
+namespace rpc {
+    const int MAX_HEARTBEAT_FAILURES = 5;
+}
+
 class RpcManager : public std::enable_shared_from_this<RpcManager> {
 public:
     RpcManager(boost::asio::io_context &ioc, const std::string &peer_id);

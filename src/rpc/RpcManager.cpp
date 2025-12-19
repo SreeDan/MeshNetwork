@@ -106,6 +106,7 @@ std::expected<std::future<std::string>, SendError> RpcManager::send_message(
 void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
     // maybe change to 5 consecutive failures -> then drop the connection
     using namespace std::chrono_literals;
+    std::unordered_map<std::string, int> consecutive_failed;
     while (true) {
         std::vector<std::string> peers;
         {
@@ -144,17 +145,24 @@ void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
             std::future<std::string> fut = std::move(pair.second);
             try {
                 fut.get();
+                consecutive_failed.insert({peer, 0});
                 std::cout << "successful heartbeat with " << peer << std::endl;
             } catch (const std::exception &e) {
                 std::cerr << e.what() << std::endl;
                 std::lock_guard<std::mutex> guard(mu_);
-                connections_.erase(peer);
-                std::cout << "failed heartbeat with " << peer << ", removing connection" << std::endl;
+
+                int current_failures = ++consecutive_failed[peer];
+                if (current_failures >= rpc::MAX_HEARTBEAT_FAILURES) {
+                    connections_.erase(peer);
+                    consecutive_failed.erase(peer);
+                    std::cout << "failed heartbeat with " << peer << ", removing connection" << std::endl;
+                } else {
+                    std::cout << "failed heartbeat with " << peer << std::endl;
+                }
             }
         }
 
-        std::this_thread::sleep_for(10s);
-        std::cout << "heartbeat thread woke back up" << std::endl;
+        std::this_thread::sleep_for(5s);
     }
 }
 
