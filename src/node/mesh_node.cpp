@@ -3,22 +3,6 @@
 
 #include "EnvelopeUtils.h"
 
-
-// void MeshNode::send_rpc_message(const std::string &peer_addr, const std::string &bytes) {
-//     std::unique_lock<std::mutex> lock(mu_);
-//     for (auto &s: sessions_) {
-//         if (s->remote_addr() == peer_addr) {
-//             mesh::Envelope env;
-//             env.set_from(peer_id_);
-//             env.set_type(mesh::CUSTOM_TEXT);
-//             env.set_payload(bytes);
-//             env.set_msg_id(new_uuid());
-//             s->async_send_message(env);
-//             return;
-//         }
-//     }
-// }
-
 MeshNode::MeshNode(boost::asio::io_context &ioc, const int tcp_port, const int udp_port, const std::string &peer_id)
     : ioc_(ioc), tcp_port_(tcp_port), udp_port_(udp_port), peer_id_(peer_id),
       acceptor_(ioc, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), tcp_port_)),

@@ -3,6 +3,7 @@
 #include <expected>
 
 #include "EnvelopeUtils.h"
+#include "handlers/TextHandler.h"
 
 RpcManager::RpcManager(boost::asio::io_context &ioc, const std::string &peer_id)
     : ioc_(ioc), peer_id_(peer_id) {
@@ -14,6 +15,7 @@ RpcManager::RpcManager(boost::asio::io_context &ioc, const std::string &peer_id)
 void RpcManager::register_handlers() {
     handlers_[mesh::EnvelopeType::HANDSHAKE] = std::make_unique<HandshakeHandler>();
     handlers_[mesh::EnvelopeType::HEARTBEAT] = std::make_unique<HeartbeatHandler>();
+    handlers_[mesh::EnvelopeType::CUSTOM_TEXT] = std::make_unique<TextHandler>();
 }
 
 RpcManager::~RpcManager() {

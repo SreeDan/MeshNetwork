@@ -28,6 +28,7 @@ add_executable(MeshNetworking main.cpp
         src/rpc/RpcManager.cpp
         src/rpc/handlers/HandshakeHandler.cpp
         src/rpc/handlers/HeartbeatHandler.cpp
+        src/rpc/handlers/TextHandler.cpp
         src/messages/EnvelopeUtils.cpp
         ${PROTO_SRCS}
         ${PROTO_HDRS}

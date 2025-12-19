@@ -7,8 +7,6 @@
 void HandshakeHandler::handle(std::shared_ptr<RpcConnection> conn, const mesh::Envelope &env) {
     if (!env.expect_response()) return;
 
-    std::cout << "in handshake handler" << std::endl;
-
     // Deserialize the request
     mesh::Handshake req;
     if (!req.ParseFromString(env.payload())) {

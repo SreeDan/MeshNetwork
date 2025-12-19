@@ -41,7 +41,6 @@ std::expected<mesh::PeerRecord, std::string> RpcConnection::start(bool initiator
                                   [self](const boost::uuids::uuid &msg_id, const std::string &payload) {
                                       self->on_message(msg_id, payload);
                                   });
-    std::cout << "starting session layer\n";
     session_->start();
 
     if (initiator) {
@@ -156,18 +155,14 @@ std::future<std::string> RpcConnection::send_message(
 }
 
 void RpcConnection::on_message(const boost::uuids::uuid &msg_id, const std::string &payload) {
-    std::cout << "[debug] payload size = " << payload.size() << std::endl;
     mesh::Envelope env;
     if (!env.ParseFromString(payload)) {
         std::cerr << "Failed to parse envelope\n";
         return;
     }
 
-    std::cout << "on message reached: " << payload << std::endl;
-
     store_response(msg_id, payload);
     if (handler_cb_) {
-        std::cout << "calling dispatcher" << std::endl;
         // Incoming request from peer
         handler_cb_(shared_from_this(), env);
     }
@@ -175,7 +170,6 @@ void RpcConnection::on_message(const boost::uuids::uuid &msg_id, const std::stri
 
 void RpcConnection::respond_to_message(const boost::uuids::uuid &msg_id, const mesh::Envelope &env) {
     if (env.type() == mesh::EnvelopeType::HANDSHAKE && env.expect_response()) {
-        std::cout << "performing response stuff\n";
         // Deserialize the request
         mesh::Handshake handshake_req;
         if (!handshake_req.ParseFromString(env.payload())) {
@@ -212,10 +206,6 @@ void RpcConnection::respond_to_message(const boost::uuids::uuid &msg_id, const m
 
 void RpcConnection::store_response(const boost::uuids::uuid &msg_id, const std::string &response) {
     std::lock_guard<std::mutex> guard(mu_);
-
-    for (const auto &pair: pending_requests_) {
-        std::cout << pair.first << std::endl;
-    }
 
     std::string binary_uuid(reinterpret_cast<const char *>(msg_id.data), 16);
     if (pending_requests_.contains(binary_uuid)) {
