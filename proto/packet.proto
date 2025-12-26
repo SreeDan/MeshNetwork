@@ -1,0 +1,26 @@
+syntax = "proto3";
+package mesh;
+
+message RouteTable {
+  // map of NodeID -> Cost (Hops)
+  map<string, uint32> costs = 1;
+}
+
+enum PacketType  {
+  ROUTING_UPDATE = 0;
+  TEXT = 1;
+  BINARY = 2;
+}
+
+message RoutedPacket {
+  string from_peer_id = 1; // origin
+  string to_peer_id = 2; // destination
+  uint32 ttl = 3;  // # of hops allowed
+
+  PacketType type = 5;
+  oneof payload_variant {
+    string text = 10;
+    RouteTable route_table = 11;
+    bytes binary_data = 12;
+  }
+}
