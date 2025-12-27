@@ -6,7 +6,7 @@
 MeshNode::MeshNode(boost::asio::io_context &ioc, const int tcp_port, const int udp_port, const std::string &peer_id)
     : ioc_(ioc), tcp_port_(tcp_port), udp_port_(udp_port), peer_id_(peer_id),
       acceptor_(ioc, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), tcp_port_)),
-      discovery_(ioc, udp_port, tcp_port), rpc_connections(std::make_shared<RpcManager>(ioc, peer_id)) {
+      rpc_connections(std::make_shared<RpcManager>(ioc, peer_id)) {
     std::lock_guard<std::mutex> guard(mu_);
     // for (auto &s: sessions_) {
     // }
@@ -14,13 +14,11 @@ MeshNode::MeshNode(boost::asio::io_context &ioc, const int tcp_port, const int u
 
 void MeshNode::start() {
     do_accept();
-    discovery_.start();
 }
 
 void MeshNode::stop() {
     boost::system::error_code ec;
     acceptor_.close(ec);
-    discovery_.stop();
 }
 
 void MeshNode::do_accept() {
@@ -77,7 +75,7 @@ void MeshNode::send_message(const std::string &remote_id, const std::string &tex
     auto local_ip = mesh::envelope::MakePeerIP(conn->local_endpoint_);
     auto remote_ip = mesh::envelope::MakePeerIP(conn->remote_endpoint_);
     auto env = mesh::envelope::MakeCustomText(local_ip, remote_ip, text);
-    auto fut = rpc_connections->send_message(remote_id, std::move(env));
+    auto fut = rpc_connections->send_message(remote_id, env);
     if (!fut.has_value()) {
         std::cerr << "send_message failed: " << fut.error() << std::endl;
     }

@@ -27,7 +27,6 @@ private:
     std::string peer_id_;
 
     boost::asio::ip::tcp::acceptor acceptor_;
-    Discovery discovery_;
 
     std::shared_ptr<RpcManager> rpc_connections;
 
