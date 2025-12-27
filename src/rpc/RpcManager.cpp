@@ -3,10 +3,14 @@
 #include <expected>
 
 #include "EnvelopeUtils.h"
+#include "handlers/HandshakeHandler.h"
+#include "handlers/HeartbeatHandler.h"
 #include "handlers/TextHandler.h"
+#include "packet.pb.h"
 
-RpcManager::RpcManager(boost::asio::io_context &ioc, const std::string &peer_id)
-    : ioc_(ioc), peer_id_(peer_id) {
+RpcManager::RpcManager(boost::asio::io_context &ioc, const std::string &peer_id,
+                       std::shared_ptr<IMessageSink> sink)
+    : ioc_(ioc), peer_id_(peer_id), sink_(sink) {
     register_handlers();
     using namespace std::chrono_literals;
     heartbeat_thread_ = std::thread([this] { send_heartbeats(300ms); });
@@ -15,10 +19,14 @@ RpcManager::RpcManager(boost::asio::io_context &ioc, const std::string &peer_id)
 void RpcManager::register_handlers() {
     handlers_[mesh::EnvelopeType::HANDSHAKE] = std::make_unique<HandshakeHandler>();
     handlers_[mesh::EnvelopeType::HEARTBEAT] = std::make_unique<HeartbeatHandler>();
-    handlers_[mesh::EnvelopeType::CUSTOM_TEXT] = std::make_unique<TextHandler>();
+    // handlers_[mesh::EnvelopeType::DATA] = std::make_unique<TextHandler>();
 }
 
 RpcManager::~RpcManager() {
+}
+
+void RpcManager::set_sink(std::shared_ptr<IMessageSink> sink) {
+    sink_ = sink;
 }
 
 std::expected<std::string, std::string> RpcManager::create_connection(const std::string &remote_addr,
@@ -87,7 +95,7 @@ std::optional<std::shared_ptr<RpcConnection> > RpcManager::get_connection(const 
 }
 
 std::expected<std::future<std::string>, SendError> RpcManager::send_message(
-    const std::string &peer, mesh::Envelope envelope,
+    const std::string &peer, mesh::Envelope &envelope,
     std::optional<std::chrono::milliseconds> timeout) {
     std::lock_guard<std::mutex> guard(mu_);
     auto it = connections_.find(peer);
@@ -162,7 +170,7 @@ void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
             }
         }
 
-        std::this_thread::sleep_for(5s);
+        std::this_thread::sleep_for(10s);
     }
 }
 
@@ -170,5 +178,9 @@ void RpcManager::dispatch_message(std::shared_ptr<RpcConnection> conn, const mes
     auto it = handlers_.find(envelope.type());
     if (it != handlers_.end()) {
         it->second->handle(conn, envelope);
+    }
+
+    if (std::shared_ptr<IMessageSink> s = sink_.lock()) {
+        s->push_packet(conn->peer_id_.data(), envelope);
     }
 };

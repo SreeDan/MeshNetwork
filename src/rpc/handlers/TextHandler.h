@@ -1,7 +1,7 @@
 #pragma once
-#include "IMessageHandler.h"
+#include "IRpcMessageHandler.h"
 
-class TextHandler : public IMessageHandler {
+class TextHandler : public IRpcMessageHandler {
 public:
     void handle(std::shared_ptr<RpcConnection> conn, const mesh::Envelope &env) override;
 };

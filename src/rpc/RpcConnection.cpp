@@ -99,8 +99,11 @@ std::expected<mesh::PeerRecord, std::string> RpcConnection::send_handshake_reque
 }
 
 std::future<std::string> RpcConnection::send_message(
-    const mesh::Envelope &envelope,
+    mesh::Envelope &envelope,
     std::chrono::milliseconds timeout) {
+    *envelope.mutable_from() = get_local_peer_ip();
+    *envelope.mutable_to() = get_remote_peer_ip();
+
     std::string message_contents = envelope.SerializeAsString();
     std::string req_id = envelope.msg_id();
     // format is 2 bytes of the len(req_id) + req_id + wrapped_req

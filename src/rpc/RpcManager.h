@@ -1,23 +1,19 @@
 #pragma once
 #include <expected>
-#include <boost/asio/io_service.hpp>
-
-#include "IMessageHandler.h"
+#include "IRpcMessageHandler.h"
+#include "IMeshNetwork.h"
 #include "RpcConnection.h"
-#include "handlers/HandshakeHandler.h"
-#include "handlers/HeartbeatHandler.h"
-
-enum SendError {
-    INVALID_PEER,
-};
+#include "envelope.pb.h"
+#include "IMessageSink.h"
 
 namespace rpc {
     const int MAX_HEARTBEAT_FAILURES = 5;
 }
 
-class RpcManager : public std::enable_shared_from_this<RpcManager> {
+class RpcManager : public std::enable_shared_from_this<RpcManager>, IMeshTransport {
 public:
-    RpcManager(boost::asio::io_context &ioc, const std::string &peer_id);
+    RpcManager(boost::asio::io_context &ioc, const std::string &peer_id,
+               std::shared_ptr<IMessageSink> sink = nullptr);
 
     ~RpcManager();
 
@@ -31,11 +27,15 @@ public:
 
     std::optional<std::shared_ptr<RpcConnection> > get_connection(const std::string &node_id);
 
-    std::expected<std::future<std::string>, SendError> send_message(const std::string &peer, mesh::Envelope envelope,
+    std::expected<std::future<std::string>, SendError> send_message(const std::string &peer, mesh::Envelope &envelope,
                                                                     std::optional<std::chrono::milliseconds> timeout =
                                                                             std::nullopt);
 
     void send_heartbeats(std::chrono::milliseconds timeout);
+
+    void set_sink(std::shared_ptr<IMessageSink> sink);
+
+    // void dispatch_message(std::shared_ptr<RpcConnection> conn, const mesh::Envelope &envelope);
 
 private:
     boost::asio::io_context &ioc_;
@@ -43,10 +43,10 @@ private:
     std::mutex mu_;
     std::unordered_map<std::string, std::shared_ptr<RpcConnection> > connections_;
     std::thread heartbeat_thread_;
-    std::unordered_map<mesh::EnvelopeType, std::unique_ptr<IMessageHandler> > handlers_;
+    std::unordered_map<mesh::EnvelopeType, std::unique_ptr<IRpcMessageHandler> > handlers_;
+    std::weak_ptr<IMessageSink> sink_;
 
     void register_handlers();
-
 
     void dispatch_message(std::shared_ptr<RpcConnection> conn, const mesh::Envelope &envelope);
 };

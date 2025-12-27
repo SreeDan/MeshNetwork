@@ -1,7 +1,7 @@
 #include "HandshakeHandler.h"
 
 #include "EnvelopeUtils.h"
-#include "IMessageHandler.h"
+#include "IRpcMessageHandler.h"
 #include "RpcConnection.h"
 
 void HandshakeHandler::handle(std::shared_ptr<RpcConnection> conn, const mesh::Envelope &env) {

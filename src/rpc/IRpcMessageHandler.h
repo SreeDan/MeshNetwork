@@ -1,13 +1,13 @@
 #pragma once
 #include <memory>
 
-#include "messages.pb.h"
+#include "envelope.pb.h"
 
 class RpcConnection;
 
-class IMessageHandler {
+class IRpcMessageHandler {
 public:
-    virtual ~IMessageHandler() = default;
+    virtual ~IRpcMessageHandler() = default;
 
     virtual void handle(std::shared_ptr<RpcConnection> conn, const mesh::Envelope &env) = 0;
 };

@@ -4,7 +4,7 @@
 #include <string>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
-#include <boost/asio/local/basic_endpoint.hpp>
+#include "envelope.pb.h"
 
 #include "session.h"
 
@@ -35,7 +35,7 @@ public:
     std::expected<mesh::PeerRecord, std::string> send_handshake_request();
 
     std::future<std::string> send_message(
-        const mesh::Envelope &envelope,
+        mesh::Envelope &envelope,
         std::chrono::milliseconds timeout = 3000ms
     );
 
