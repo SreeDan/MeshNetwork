@@ -4,6 +4,8 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
+#include "envelope.pb.h"
+
 namespace mesh {
     namespace envelope {
         static boost::uuids::uuid gen_uuid() {
@@ -26,7 +28,7 @@ namespace mesh {
             *e.mutable_to() = to;
             e.set_msg_id(gen_uuid().data, 16);
             e.set_payload(payload);
-            e.set_type(mesh::CUSTOM_TEXT);
+            e.set_type(mesh::DATA);
             e.set_expect_response(false);
             return e;
         }

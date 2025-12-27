@@ -3,7 +3,7 @@
 #include <boost/asio/ip/basic_endpoint.hpp>
 #include <boost/asio/ip/tcp.hpp>
 
-#include "messages.pb.h"
+#include "envelope.pb.h"
 
 namespace mesh {
     const std::string MeshVersion = "1.0.0";
