@@ -30,6 +30,8 @@ add_executable(MeshNetworking main.cpp
         src/rpc/handlers/HeartbeatHandler.cpp
         src/rpc/handlers/TextHandler.cpp
         src/messages/EnvelopeUtils.cpp
+        src/routing/MeshRouter.cpp
+        src/messages/RoutedPacketUtils.cpp
         ${PROTO_SRCS}
         ${PROTO_HDRS}
 )
@@ -44,6 +46,7 @@ target_include_directories(MeshNetworking PRIVATE
         src/node
         src/rpc
         src/messages
+        src/routing
 )
 
 target_link_libraries(MeshNetworking PRIVATE
