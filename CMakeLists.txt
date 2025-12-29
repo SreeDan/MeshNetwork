@@ -28,10 +28,9 @@ add_executable(MeshNetworking main.cpp
         src/rpc/RpcManager.cpp
         src/rpc/handlers/HandshakeHandler.cpp
         src/rpc/handlers/HeartbeatHandler.cpp
-        src/rpc/handlers/TextHandler.cpp
-        src/messages/EnvelopeUtils.cpp
+        src/proto_types/EnvelopeUtils.cpp
+        src/proto_types/RoutedPacketUtils.cpp
         src/routing/MeshRouter.cpp
-        src/messages/RoutedPacketUtils.cpp
         ${PROTO_SRCS}
         ${PROTO_HDRS}
 )
@@ -45,7 +44,7 @@ target_include_directories(MeshNetworking PRIVATE
         src/net
         src/node
         src/rpc
-        src/messages
+        src/proto_types
         src/routing
 )
 
