@@ -3,7 +3,7 @@
 #include "packet.pb.h"
 #include "RoutedPacketUtils.h"
 
-MeshRouter::MeshRouter(const std::string &self_id, std::shared_ptr<IMeshTransport> transport)
+MeshRouter::MeshRouter(const std::string &self_id, std::shared_ptr<ITransportLayer> transport)
     : self_id_(self_id), transport_(transport) {
     forwarding_table_[self_id] = RouteEntry{self_id, 0, false};
     last_periodic_update = std::chrono::steady_clock::now();
@@ -27,7 +27,7 @@ void MeshRouter::stop() {
         routing_thread_.join();
 }
 
-void MeshRouter::set_transport(std::shared_ptr<IMeshTransport> transport) {
+void MeshRouter::set_transport(std::shared_ptr<ITransportLayer> transport) {
     transport_ = transport;
 }
 
@@ -177,7 +177,7 @@ void MeshRouter::route_data_packet(const std::string &from_peer, const std::stri
     }
     env.set_payload(pkt.SerializeAsString());
 
-    if (std::shared_ptr<IMeshTransport> t = transport_.lock()) {
+    if (std::shared_ptr<ITransportLayer> t = transport_.lock()) {
         std::cout << "routing packet through " << next_peer_id << std::endl;
         std::cout << "passing env to transport with pkt id " << pkt.id() << std::endl;
         t->send_message(next_peer_id, env);

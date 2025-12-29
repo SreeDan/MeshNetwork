@@ -1,7 +1,7 @@
 #pragma once
 #include <expected>
 #include "IRpcMessageHandler.h"
-#include "IMeshNetwork.h"
+#include "ITrasportLayer.h"
 #include "RpcConnection.h"
 #include "envelope.pb.h"
 #include "IMessageSink.h"
@@ -10,7 +10,7 @@ namespace rpc {
     const int MAX_HEARTBEAT_FAILURES = 5;
 }
 
-class RpcManager : public std::enable_shared_from_this<RpcManager>, public IMeshTransport {
+class RpcManager : public std::enable_shared_from_this<RpcManager>, public ITransportLayer {
 public:
     RpcManager(boost::asio::io_context &ioc, const std::string &peer_id,
                std::shared_ptr<IMessageSink> sink = nullptr);
@@ -34,8 +34,6 @@ public:
     void send_heartbeats(std::chrono::milliseconds timeout);
 
     void set_sink(std::shared_ptr<IMessageSink> sink);
-
-    // void dispatch_message(std::shared_ptr<RpcConnection> conn, const mesh::Envelope &envelope);
 
 private:
     boost::asio::io_context &ioc_;

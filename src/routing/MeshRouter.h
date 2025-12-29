@@ -33,11 +33,11 @@ class MeshRouter : public IMessageSink {
 public:
     using OnMessageReceived = std::function<void(const std::string &from_id, const mesh::RoutedPacket &pkt)>;
 
-    MeshRouter(const std::string &self_id, std::shared_ptr<IMeshTransport> transport = nullptr);
+    MeshRouter(const std::string &self_id, std::shared_ptr<ITransportLayer> transport = nullptr);
 
     ~MeshRouter();
 
-    void set_transport(std::shared_ptr<IMeshTransport> transport);
+    void set_transport(std::shared_ptr<ITransportLayer> transport);
 
     // User API
     void start();
@@ -59,7 +59,7 @@ public:
 
 private:
     const std::string self_id_;
-    std::weak_ptr<IMeshTransport> transport_;
+    std::weak_ptr<ITransportLayer> transport_;
 
     OnMessageReceived on_message_cb_;
 
