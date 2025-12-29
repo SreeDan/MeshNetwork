@@ -5,7 +5,6 @@
 #include "EnvelopeUtils.h"
 #include "handlers/HandshakeHandler.h"
 #include "handlers/HeartbeatHandler.h"
-#include "handlers/TextHandler.h"
 #include "packet.pb.h"
 
 RpcManager::RpcManager(boost::asio::io_context &ioc, const std::string &peer_id,
