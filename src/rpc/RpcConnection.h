@@ -47,13 +47,21 @@ public:
 
     void fulfill_handshake_promise(const mesh::PeerRecord &record);
 
-    const std::string &peer_id_;
+    std::string get_self_peer_id();
+
+    void set_remote_peer_id(const std::string &peer_id);
+
+    std::string get_remote_peer_id();
+
     boost::asio::ip::basic_endpoint<boost::asio::ip::tcp> local_endpoint_;
     boost::asio::ip::basic_endpoint<boost::asio::ip::tcp> remote_endpoint_;
 
 private:
     boost::asio::io_context &ioc_;
     boost::asio::ip::tcp::socket sock_;
+
+    const std::string peer_id_;
+    std::string authenticated_remote_id_;
 
     std::shared_ptr<std::promise<std::expected<mesh::PeerRecord, std::string> > > handshake_promise_;
 

@@ -7,12 +7,12 @@
 #include "envelope.pb.h"
 
 namespace mesh {
-    namespace envelope {
-        static boost::uuids::uuid gen_uuid() {
-            static boost::uuids::random_generator generator;
-            return generator();
-        }
+    boost::uuids::uuid gen_uuid() {
+        static boost::uuids::random_generator generator;
+        return generator();
+    }
 
+    namespace envelope {
         PeerIP MakePeerIP(boost::asio::ip::basic_endpoint<boost::asio::ip::tcp> endpoint) {
             PeerIP ip;
             ip.set_ip(endpoint.address().to_string());

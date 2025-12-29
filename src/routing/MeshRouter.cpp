@@ -7,6 +7,8 @@ MeshRouter::MeshRouter(const std::string &self_id, std::shared_ptr<IMeshTranspor
     : self_id_(self_id), transport_(transport) {
     forwarding_table_[self_id] = RouteEntry{self_id, 0, false};
     last_periodic_update = std::chrono::steady_clock::now();
+    std::thread(&MeshRouter::print_routing_table, this).detach();
+    start();
 }
 
 MeshRouter::~MeshRouter() {
@@ -25,13 +27,20 @@ void MeshRouter::stop() {
         routing_thread_.join();
 }
 
+void MeshRouter::set_transport(std::shared_ptr<IMeshTransport> transport) {
+    transport_ = transport;
+}
 
 void MeshRouter::set_on_message_received(OnMessageReceived cb) {
     on_message_cb_ = std::move(cb);
 }
 
-void MeshRouter::push_packet(const std::string &from_peer, const mesh::Envelope &env) {
-    event_queue_.push({EventType::PACKET_RECEIVED, from_peer, env});
+void MeshRouter::push_data_bytes(const std::string &from_peer, const std::string &payload_bytes) {
+    std::optional<mesh::RoutedPacket> pkt_opt = mesh::packet::decodeRoutedPacket(payload_bytes);
+    if (!pkt_opt.has_value()) return;
+    mesh::RoutedPacket &pkt = pkt_opt.value();
+
+    event_queue_.push({EventType::PACKET_RECEIVED, from_peer, std::move(pkt)});
 }
 
 void MeshRouter::on_peer_connected(const std::string &peer_id) {
@@ -59,18 +68,17 @@ void MeshRouter::processing_loop() {
         auto event_opt = event_queue_.pop_for(wait_duration);
 
         if (event_opt) {
-            std::lock_guard<std::mutex> lock(mu_);
-
-            const auto &event = *event_opt;
+            auto &event = *event_opt;
             if (event.type == EventType::PEER_CONNECTED) {
                 std::cout << "[Router] Peer connected " << event.peer_id << std::endl;
                 neighbor_views_[event.peer_id].last_heard_from = std::chrono::steady_clock::now();
+                recalculate_forwarding_table();
             } else if (event.type == EventType::PEER_DISCONNECTED) {
                 std::cout << "[Router] Peer disconnected " << event.peer_id << std::endl;
                 neighbor_views_.erase(event.peer_id);
                 recalculate_forwarding_table();
             } else if (event.type == EventType::PACKET_RECEIVED) {
-                handle_packet(event.peer_id, event.envelope);
+                handle_packet(event.peer_id, event.packet);
             }
         }
 
@@ -86,25 +94,37 @@ void MeshRouter::processing_loop() {
     }
 }
 
-void MeshRouter::handle_packet(const std::string &src_id, const mesh::Envelope &env) {
+void MeshRouter::handle_packet(const std::string &src_id, mesh::RoutedPacket &pkt) {
     // Do dedup check.
     // If seenmessages.contains(env.msg.id())
-
-    std::optional<mesh::RoutedPacket> pkt_opt = mesh::packet::decodeRoutedPacket(env.payload());
-    if (!pkt_opt.has_value()) {
+    if (src_id == self_id_ || pkt.from_peer_id() == self_id_) {
         return;
     }
-    mesh::RoutedPacket &pkt = pkt_opt.value();
+
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (neighbor_views_.contains(src_id)) {
+            neighbor_views_[src_id].last_heard_from = std::chrono::steady_clock::now();
+        }
+    }
 
     if (pkt.type() == mesh::PacketType::ROUTING_UPDATE) {
         process_routing_update(src_id, pkt.route_table());
     } else if (pkt.type() == mesh::PacketType::TEXT) {
         route_data_packet(pkt.from_peer_id(), pkt.to_peer_id(), pkt);
+    } else {
+        std::cerr << "Unknown type " << pkt.type() << std::endl;
     }
 }
 
 void MeshRouter::send_text(const std::string &dest_id, const std::string &text) {
-    // route_data_packet(self_id_, dest_id, text);
+    mesh::RoutedPacket pkt = mesh::packet::MakeTextRoutedPacket(
+        self_id_,
+        dest_id,
+        DEFAULT_TTL,
+        text
+    );
+    route_data_packet(self_id_, dest_id, pkt);
 }
 
 void MeshRouter::route_data_packet(const std::string &from_peer, const std::string &dest_peer,
@@ -118,9 +138,16 @@ void MeshRouter::route_data_packet(const std::string &from_peer, const std::stri
         return;
     }
 
-    std::lock_guard<std::mutex> lock(mu_);
+    // Track visited peers to prevent loops
+    if (seen_ids_.contains(pkt.id())) {
+        std::cerr << "[Router] Detected loop for pkt " << pkt.id() << " — dropping\n";
+        return;
+    }
+    seen_ids_.insert(pkt.id());
+
     std::string next_peer_id;
     {
+        std::lock_guard<std::mutex> lock(mu_);
         // Find where to forward it
         auto it = forwarding_table_.find(dest_peer);
         if (it == forwarding_table_.end() || it->second.cost >= INF_COST) {
@@ -134,6 +161,12 @@ void MeshRouter::route_data_packet(const std::string &from_peer, const std::stri
         next_peer_id = it->second.next_hop;
     }
 
+    if (next_peer_id == self_id_) {
+        std::cerr << "[Router] Loop detected: route to "
+                << dest_peer << " points to self — dropping\n";
+        return;
+    }
+
     // Construct the new env to forward
     mesh::Envelope env;
     env.set_type(mesh::EnvelopeType::DATA);
@@ -145,6 +178,8 @@ void MeshRouter::route_data_packet(const std::string &from_peer, const std::stri
     env.set_payload(pkt.SerializeAsString());
 
     if (std::shared_ptr<IMeshTransport> t = transport_.lock()) {
+        std::cout << "routing packet through " << next_peer_id << std::endl;
+        std::cout << "passing env to transport with pkt id " << pkt.id() << std::endl;
         t->send_message(next_peer_id, env);
     } else {
         std::cerr << "[Router] Transport is dead, cannot route." << std::endl;
@@ -152,6 +187,7 @@ void MeshRouter::route_data_packet(const std::string &from_peer, const std::stri
 }
 
 void MeshRouter::process_routing_update(const std::string &neighbor_id, const mesh::RouteTable &table) {
+    std::lock_guard<std::mutex> lock(mu_);
     auto &view = neighbor_views_[neighbor_id];
     view.last_heard_from = std::chrono::steady_clock::now();
 
@@ -169,37 +205,45 @@ void MeshRouter::process_routing_update(const std::string &neighbor_id, const me
 void MeshRouter::recalculate_forwarding_table() {
     bool table_changed = false;
     std::unordered_map<std::string, RouteEntry> new_table;
-    new_table[self_id_] = RouteEntry{self_id_, 0, false};
+    auto now = std::chrono::steady_clock::now();
+    new_table[self_id_] = {self_id_, 0, false, now};
 
     for (const auto &[neighbor_id, view]: neighbor_views_) {
-        if (!new_table.contains(neighbor_id) || 1 < new_table[neighbor_id].cost) {
-            new_table[neighbor_id] = {neighbor_id, 1, true};
-        }
+        new_table[neighbor_id] = {neighbor_id, 1, true, now};
+    }
+    // if (!new_table.contains(neighbor_id) || 1 < new_table[neighbor_id].cost) {
+    //     new_table[neighbor_id] = {neighbor_id, 1, true};
+    // }
 
+    for (const auto &[neighbor_id, view]: neighbor_views_) {
         for (const auto &[dest, remote_cost]: view.advertised_routes) {
+            if (dest == self_id_) continue;
+
             const uint32_t total_cost = remote_cost + 1;
             if (total_cost >= INF_COST) continue;
 
             if (!new_table.contains(dest) || total_cost < new_table[dest].cost) {
-                new_table[dest] = {neighbor_id, total_cost, true};
+                new_table[dest] = {neighbor_id, total_cost, true, now};
             }
         }
     }
 
-    // merge new_table into forwarding_table
-    auto now = std::chrono::steady_clock::now();
-
-    for (const auto &[dest, entry]: new_table) {
+    // merge new_table into forwarding_table and mark dirty if changed
+    for (auto &[dest, entry]: new_table) {
         auto it = forwarding_table_.find(dest);
+
         if (it == forwarding_table_.end()) {
+            // new route
             forwarding_table_[dest] = entry;
-            forwarding_table_[dest].last_updated = now;
             forwarding_table_[dest].dirty = true;
+            forwarding_table_[dest].last_updated = now;
             table_changed = true;
         } else if (it->second.cost != entry.cost || it->second.next_hop != entry.next_hop) {
-            forwarding_table_[dest] = entry;
-            forwarding_table_[dest].last_updated = now;
-            forwarding_table_[dest].dirty = true;
+            // route changed
+            it->second.cost = entry.cost;
+            it->second.next_hop = entry.next_hop;
+            it->second.last_updated = now;
+            it->second.dirty = true;
             table_changed = true;
         }
     }
@@ -222,27 +266,6 @@ void MeshRouter::recalculate_forwarding_table() {
         trigger_deadline_ = now + TRIGGER_DEBOUNCE;
     }
 }
-
-// void MeshRouter::on_packet_received(const mesh::Envelope &env) {
-//     std::string src_peer_id;
-//     {
-//         // Deal with dedeuplication of seen messages
-//     }
-//
-//     // if (env.type() == mesh::EnvelopeType::ROUTING_UPDATE) {
-//     //     mesh::RouteTable rt;
-//     //     if (rt.ParseFromString(env.payload())) {
-//     //         std::lock_guard<std::mutex> lock(mu_);
-//     //         process_routing_update(src_peer_id, rt);
-//     //     }
-//     // } else if (env.type() == mesh::EnvelopeType::CUSTOM_TEXT) {
-//     //     mesh::RoutedPacket pkt;
-//     //     if (pkt.ParseFromString(env.payload())) {
-//     //         // No lock needed here (route_data_packet locks internally when needed)
-//     //         route_data_packet(pkt.from_peer_id(), pkt.to_peer_id(), pkt.text());
-//     //     }
-//     // }
-// }
 
 void MeshRouter::run_periodic_maintenance(std::chrono::steady_clock::time_point time_point) {
     auto now = std::chrono::steady_clock::now();
@@ -284,32 +307,33 @@ void MeshRouter::run_periodic_maintenance(std::chrono::steady_clock::time_point 
         }
         ++gc_it;
     }
+
     // TODO: Remove seen messages inside the DEDUP window
 }
 
 void MeshRouter::send_triggered_updates() {
-    std::unordered_map<std::string, uint32_t> dirty_routes;
+    std::unordered_map<std::string, uint32_t> routes_to_send;
 
     for (auto &[dest, entry]: forwarding_table_) {
-        if (entry.dirty) {
-            dirty_routes[dest] = entry.cost;
+        if (entry.dirty || entry.cost >= INF_COST) {
+            routes_to_send[dest] = entry.cost;
             entry.dirty = false;
         }
     }
-    if (dirty_routes.empty()) return;
+    if (routes_to_send.empty()) return;
 
     for (const auto &[neighbor_id, view]: neighbor_views_) {
         mesh::RouteTable update;
-        for (const auto &[dest, cost]: dirty_routes) {
+        for (const auto &[dest, cost]: routes_to_send) {
             uint32_t final_cost = cost;
 
-            // poison reverse
+            // poison reverse, tell neighbor that route through it is INF
             auto it = forwarding_table_.find(dest);
             if (it != forwarding_table_.end() && it->second.next_hop == neighbor_id) {
                 final_cost = INF_COST;
             }
 
-            (*update.mutable_costs())[dest] = final_cost;
+            update.mutable_costs()->insert({dest, final_cost});
         }
 
         mesh::Envelope env;
@@ -317,8 +341,8 @@ void MeshRouter::send_triggered_updates() {
         auto pkt = mesh::packet::MakeRoutingTableRoutedPacket(
             self_id_,
             neighbor_id,
-            15,
-            &update
+            DEFAULT_TTL,
+            update
         );
 
         env.set_payload(pkt.SerializeAsString());
@@ -341,7 +365,8 @@ void MeshRouter::broadcast_full_table() {
                 final_cost = INF_COST;
             }
 
-            (*update.mutable_costs())[dest] = final_cost;
+            update.mutable_costs()->insert({dest, final_cost});
+            // (*update.mutable_costs())[dest] = final_cost;
         }
 
         mesh::Envelope env;
@@ -350,7 +375,7 @@ void MeshRouter::broadcast_full_table() {
             self_id_,
             neighbor_id,
             15,
-            &update
+            update
         );
 
         env.set_payload(pkt.SerializeAsString());
@@ -358,5 +383,19 @@ void MeshRouter::broadcast_full_table() {
         if (std::shared_ptr t = transport_.lock()) {
             t->send_message(neighbor_id, env);
         }
+    }
+}
+
+void MeshRouter::print_routing_table() {
+    while (true) {
+        using namespace std::chrono_literals;
+        std::this_thread::sleep_for(10s);
+        std::cout << "=== Routing Table (" << self_id_ << ") ===\n";
+        for (const auto &[dest, entry]: forwarding_table_) {
+            std::cout << "Dest: " << dest
+                    << " | NextHop: " << entry.next_hop
+                    << " | Cost: " << entry.cost << "\n";
+        }
+        std::cout << "================================\n";
     }
 }

@@ -72,6 +72,18 @@ mesh::PeerIP RpcConnection::get_remote_peer_ip() {
     return remote_ip;
 }
 
+std::string RpcConnection::get_self_peer_id() {
+    return peer_id_;
+}
+
+std::string RpcConnection::get_remote_peer_id() {
+    return authenticated_remote_id_;
+}
+
+void RpcConnection::set_remote_peer_id(const std::string &peer_id) {
+    authenticated_remote_id_ = peer_id;
+}
+
 std::expected<mesh::PeerRecord, std::string> RpcConnection::send_handshake_request() {
     mesh::PeerIP local_ip = get_local_peer_ip();
     mesh::PeerIP remote_ip = get_remote_peer_ip();

@@ -19,7 +19,7 @@ void HandshakeHandler::handle(std::shared_ptr<RpcConnection> conn, const mesh::E
         auto response = mesh::envelope::MakeHandshakeResponse(
             conn->get_local_peer_ip(),
             env.from(),
-            conn->peer_id_
+            conn->get_self_peer_id()
         );
         response.set_msg_id(env.msg_id());
         conn->send_message(response);

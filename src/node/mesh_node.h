@@ -3,6 +3,7 @@
 #include <boost/asio.hpp>
 
 #include "discovery.h"
+#include "MeshRouter.h"
 #include "RpcConnection.h"
 #include "RpcManager.h"
 #include "net/session.h"
@@ -20,6 +21,8 @@ public:
 
     void connect_to(const std::string &host, int port);
 
+    void handle_received_message(const std::string &from_id, const mesh::RoutedPacket &pkt);
+
 private:
     boost::asio::io_context &ioc_;
     int tcp_port_;
@@ -29,6 +32,7 @@ private:
     boost::asio::ip::tcp::acceptor acceptor_;
 
     std::shared_ptr<RpcManager> rpc_connections;
+    std::shared_ptr<MeshRouter> router_;
 
     std::mutex mu_;
 

@@ -48,8 +48,15 @@ std::expected<std::string, std::string> RpcManager::create_connection(const std:
     auto res = rpc_connection->start(true); // Blocking call
     if (res.has_value()) {
         std::lock_guard<std::mutex> guard(mu_);
-        connections_.insert({res.value().peer_id(), rpc_connection});
-        return res.value().peer_id();
+        auto remote_peer_id = res.value().peer_id();
+        rpc_connection->set_remote_peer_id(remote_peer_id);
+        connections_.insert({remote_peer_id, rpc_connection});
+
+        if (std::shared_ptr<IMessageSink> sink = sink_.lock()) {
+            sink->on_peer_connected(remote_peer_id);
+        }
+
+        return remote_peer_id;
     } else {
         return std::unexpected(res.error());
     }
@@ -72,7 +79,13 @@ void RpcManager::accept_connection(const std::string &remote_addr, boost::asio::
         if (res.has_value()) {
             std::cout << "Handshake complete. Accepted peer: " << res.value().peer_id() << std::endl;
             std::lock_guard<std::mutex> guard(mu_);
-            connections_.insert({res.value().peer_id(), rpc_connection});
+            auto remote_peer_id = res.value().peer_id();
+            rpc_connection->set_remote_peer_id(remote_peer_id);
+            connections_.insert({remote_peer_id, rpc_connection});
+
+            if (std::shared_ptr<IMessageSink> sink = sink_.lock()) {
+                sink->on_peer_connected(remote_peer_id);
+            }
         } else {
             std::cerr << "Handshake failed: " << res.error() << std::endl;
         }
@@ -80,30 +93,45 @@ void RpcManager::accept_connection(const std::string &remote_addr, boost::asio::
 }
 
 bool RpcManager::remove_connection(std::string peer_id) {
-    std::lock_guard<std::mutex> guard(mu_);
-    return connections_.erase(peer_id);
+    std::shared_ptr<IMessageSink> sink;
+    {
+        std::lock_guard<std::mutex> guard(mu_);
+        connections_.erase(peer_id);
+        sink = sink_.lock();
+    }
+
+    if (sink) sink->on_peer_disconnected(peer_id);
+    return true;
 }
 
 std::optional<std::shared_ptr<RpcConnection> > RpcManager::get_connection(const std::string &peer_id) {
-    std::lock_guard<std::mutex> guard(mu_);
-    auto it = connections_.find(peer_id);
-    if (it == connections_.end()) {
-        return nullptr;
+    std::optional<std::shared_ptr<RpcConnection> > conn;
+    {
+        std::lock_guard<std::mutex> guard(mu_);
+        auto it = connections_.find(peer_id);
+        if (it == connections_.end()) {
+            return nullptr;
+        }
+        conn = it->second;
     }
 
-    return it->second;
+    return conn;
 }
 
 std::expected<std::future<std::string>, SendError> RpcManager::send_message(
     const std::string &peer, mesh::Envelope &envelope,
     std::optional<std::chrono::milliseconds> timeout) {
-    std::lock_guard<std::mutex> guard(mu_);
-    auto it = connections_.find(peer);
-    if (it == connections_.end()) {
-        return std::unexpected(SendError{INVALID_PEER});
+    std::shared_ptr<RpcConnection> conn;
+    {
+        std::lock_guard<std::mutex> guard(mu_);
+        auto it = connections_.find(peer);
+        if (it == connections_.end()) {
+            return std::unexpected(SendError{INVALID_PEER});
+        }
+        conn = it->second;
     }
 
-    std::shared_ptr<RpcConnection> conn = it->second;
+    // std::cout << "transport: Sending env with data" << envelope.payload() << std::endl;
     if (timeout.has_value()) {
         return conn->send_message(envelope, timeout.value());
     } else {
@@ -134,18 +162,23 @@ void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
 
             std::shared_ptr<RpcConnection> conn = it->second;
 
-            mesh::PeerIP local_ip;
-            local_ip.set_ip(conn->local_endpoint_.address().to_string());
-            local_ip.set_port(conn->local_endpoint_.port());
-
-            mesh::PeerIP remote_ip;
-            remote_ip.set_ip(conn->remote_endpoint_.address().to_string());
-            remote_ip.set_port(conn->remote_endpoint_.port());
-
+            mesh::PeerIP local_ip = conn->get_local_peer_ip();
+            mesh::PeerIP remote_ip = conn->get_remote_peer_ip();
             auto env = mesh::envelope::MakeHeartbeatRequest(local_ip, remote_ip);
 
             auto result = conn->send_message(env, timeout);
             futures.insert({peer, std::move(result)});
+            /*
+                   mesh::PeerIP local_ip = conn->get_local_peer_ip();
+                   mesh::PeerIP remote_ip = conn->get_remote_peer_ip();
+                   auto env = mesh::envelope::MakeHeartbeatRequest(local_ip, remote_ip);
+                   auto result = send_message(peer, env);
+                   if (!result.has_value()) {
+                       continue;
+                   }
+
+                   futures.insert({peer, std::move(result.value())});
+                   */
         }
 
         for (auto &pair: futures) {
@@ -178,9 +211,12 @@ void RpcManager::dispatch_message(std::shared_ptr<RpcConnection> conn, const mes
     auto it = handlers_.find(envelope.type());
     if (it != handlers_.end()) {
         it->second->handle(conn, envelope);
+    } else {
+        if (std::shared_ptr<IMessageSink> s = sink_.lock()) {
+            s->push_data_bytes(conn->get_remote_peer_id(), envelope.payload());
+        }
     }
 
-    if (std::shared_ptr<IMessageSink> s = sink_.lock()) {
-        s->push_packet(conn->peer_id_.data(), envelope);
-    }
+    // if (envelope.type() != mesh::EnvelopeType::HANDSHAKE) {
+    // }
 };

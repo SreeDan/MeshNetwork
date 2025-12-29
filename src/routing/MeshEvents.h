@@ -1,5 +1,6 @@
 #include <string>
 #include "envelope.pb.h"
+#include "RoutedPacketUtils.h"
 
 enum class EventType {
     PACKET_RECEIVED,
@@ -12,5 +13,5 @@ struct MeshEvent {
     std::string peer_id;
 
     // Optional: used if type == PACKET_RECEIVED
-    mesh::Envelope envelope;
+    mesh::RoutedPacket packet;
 };

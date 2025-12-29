@@ -25,14 +25,14 @@ namespace mesh {
             std::string from_peer_id,
             std::string to_peer_id,
             uint32_t ttl,
-            std::map<std::string, uint32_t> &routing_table
+            const std::map<std::string, uint32_t> &routing_table
         );
 
         RoutedPacket MakeRoutingTableRoutedPacket(
             std::string from_peer_id,
             std::string to_peer_id,
             uint32_t ttl,
-            RouteTable *rt
+            const RouteTable &rt
         );
     }
 }

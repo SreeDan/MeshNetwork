@@ -64,13 +64,14 @@ public:
         auto data = std::make_shared<std::vector<char> >();
         data->reserve(16 + 4 * message.size());
 
-        data->insert(data->end(), req_id.begin(), req_id.end());
+        const auto &uuid = *reinterpret_cast<const boost::uuids::uuid *>(req_id.data());
+        data->insert(data->end(), uuid.begin(), uuid.end());
         uint32_t payload_len = htonl(static_cast<uint32_t>(message.size()));
         const char *len_ptr = reinterpret_cast<const char *>(&payload_len);
 
         data->insert(data->end(), len_ptr, len_ptr + sizeof(payload_len));
         data->insert(data->end(), message.begin(), message.end());
-        std::cout << "writing data to queue" << std::endl;
+        std::cout << std::endl;
         write_queue_->write(std::move(data));
     }
 

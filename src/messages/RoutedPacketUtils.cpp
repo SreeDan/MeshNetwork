@@ -1,5 +1,6 @@
 #include <optional>
 
+#include "EnvelopeUtils.h"
 #include "packet.pb.h"
 
 namespace mesh {
@@ -20,6 +21,7 @@ namespace mesh {
             std::string payload
         ) {
             RoutedPacket pkt;
+            pkt.set_id(gen_uuid().data, 16);
             pkt.set_from_peer_id(from_peer_id);
             pkt.set_to_peer_id(to_peer_id);
             pkt.set_ttl(ttl);
@@ -35,6 +37,7 @@ namespace mesh {
             std::vector<uint8_t> raw_data
         ) {
             RoutedPacket pkt;
+            pkt.set_id(gen_uuid().data, 16);
             pkt.set_from_peer_id(from_peer_id);
             pkt.set_to_peer_id(to_peer_id);
             pkt.set_ttl(ttl);
@@ -47,9 +50,10 @@ namespace mesh {
             std::string from_peer_id,
             std::string to_peer_id,
             uint32_t ttl,
-            std::map<std::string, uint32_t> &routing_table
+            const std::map<std::string, uint32_t> &routing_table
         ) {
             RoutedPacket pkt;
+            pkt.set_id(gen_uuid().data, 16);
             pkt.set_from_peer_id(from_peer_id);
             pkt.set_to_peer_id(to_peer_id);
             pkt.set_ttl(ttl);
@@ -60,19 +64,21 @@ namespace mesh {
             pkt.set_allocated_route_table(&rt);
             return pkt;
         }
-  RoutedPacket MakeRoutingTableRoutedPacket(
+
+        RoutedPacket MakeRoutingTableRoutedPacket(
             std::string from_peer_id,
             std::string to_peer_id,
             uint32_t ttl,
-            RouteTable *rt
+            const RouteTable &rt
         ) {
             RoutedPacket pkt;
+            pkt.set_id(gen_uuid().data, 16);
             pkt.set_from_peer_id(from_peer_id);
             pkt.set_to_peer_id(to_peer_id);
             pkt.set_ttl(ttl);
             pkt.set_type(PacketType::ROUTING_UPDATE);
 
-            pkt.set_allocated_route_table(rt);
+            pkt.mutable_route_table()->CopyFrom(rt);
             return pkt;
         }
     }

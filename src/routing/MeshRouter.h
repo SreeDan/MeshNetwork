@@ -8,11 +8,13 @@
 #include "MeshEvents.h"
 #include "RpcManager.h"
 #include "packet.pb.h"
+#include "RoutedPacketUtils.h"
 #include "ThreadSafeQueue.h"
 
+const uint32_t DEFAULT_TTL = 10;
 const uint32_t INF_COST = 16;
 const auto ROUTE_TIMEOUT = std::chrono::seconds(180); // Neighbors expire if silent for 3 mins
-const auto UPDATE_INTERVAL = std::chrono::seconds(30); // Periodic full dumps
+const auto UPDATE_INTERVAL = std::chrono::seconds(10); // Periodic full dumps
 const auto TRIGGER_DEBOUNCE = std::chrono::milliseconds(100); // Wait 100ms before sending trigger
 
 struct RouteEntry {
@@ -27,13 +29,15 @@ struct NeighborView {
     std::chrono::steady_clock::time_point last_heard_from;
 };
 
-class MeshRouter : IMessageSink {
+class MeshRouter : public IMessageSink {
 public:
     using OnMessageReceived = std::function<void(const std::string &from_id, const mesh::RoutedPacket &pkt)>;
 
     MeshRouter(const std::string &self_id, std::shared_ptr<IMeshTransport> transport = nullptr);
 
     ~MeshRouter();
+
+    void set_transport(std::shared_ptr<IMeshTransport> transport);
 
     // User API
     void start();
@@ -47,7 +51,7 @@ public:
     void set_on_message_received(OnMessageReceived cb);
 
     // IMessageSink impl
-    void push_packet(const std::string &from_peer, const mesh::Envelope &env) override;
+    void push_data_bytes(const std::string &from_peer, const std::string &payload_bytes) override;
 
     void on_peer_connected(const std::string &peer_id) override;
 
@@ -65,6 +69,10 @@ private:
 
     ThreadSafeQueue<MeshEvent> event_queue_;
 
+    // TODO: change for something more robust
+    // Maybe LRU set based off peer ids
+    std::unordered_set<std::string> seen_ids_;
+
     // Routing state (protected by mu_)
     std::unordered_map<std::string, RouteEntry> forwarding_table_;
     std::unordered_map<std::string, NeighborView> neighbor_views_;
@@ -76,7 +84,7 @@ private:
 
     void processing_loop(); // Main event loop
 
-    void handle_packet(const std::string &src_id, const mesh::Envelope &env);
+    void handle_packet(const std::string &src_id, mesh::RoutedPacket &pkt);
 
     void process_routing_update(const std::string &neighbor_id, const mesh::RouteTable &table);
 
@@ -90,4 +98,7 @@ private:
     void send_triggered_updates();
 
     void broadcast_full_table();
+
+    // Debug
+    void print_routing_table();
 };
