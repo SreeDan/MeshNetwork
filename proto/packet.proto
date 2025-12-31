@@ -15,7 +15,7 @@ enum PacketType  {
 message RoutedPacket {
   bytes id = 1; // origin
   string from_peer_id = 2; // origin
-  string to_peer_id = 3; // destination
+  string to_peer_id = 3; // destination, empty meaning broadcast - everyone should receive the packet
   uint32 ttl = 4;  // # of hops allowed
 
   PacketType type = 5;
