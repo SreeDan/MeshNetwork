@@ -13,10 +13,6 @@ MeshNode::MeshNode(boost::asio::io_context &ioc, const int tcp_port, const int u
         [this](const std::string &from_id, const mesh::RoutedPacket &pkt) {
             handle_received_message(from_id, pkt);
         });
-
-    std::lock_guard<std::mutex> guard(mu_);
-    // for (auto &s: sessions_) {
-    // }
 }
 
 void MeshNode::start() {
@@ -72,24 +68,7 @@ void MeshNode::connect_to(const std::string &host, int port) {
 }
 
 void MeshNode::send_message(const std::string &remote_id, const std::string &text) {
-    // std::optional<std::shared_ptr<RpcConnection> > maybe_conn = rpc_connections->get_connection(remote_id);
-    // if (!maybe_conn.has_value()) {
-    //     std::cerr << "no conn found with remote_id " << remote_id << std::endl;
-    //     return;
-    // }
-
-    // auto conn = maybe_conn.value();
-    // auto local_ip = mesh::envelope::MakePeerIP(conn->local_endpoint_);
-    // auto remote_ip = mesh::envelope::MakePeerIP(conn->remote_endpoint_);
-    // auto env = mesh::envelope::MakeCustomText(local_ip, remote_ip, text);
-
     router_->send_text(remote_id, text);
-
-    // auto fut = rpc_connections->send_message(remote_id, env);
-    // if (!fut.has_value()) {
-    //     std::cerr << "send_message failed: " << fut.error() << std::endl;
-    // }
-    // fut->get();
 }
 
 void MeshNode::handle_received_message(const std::string &from_id, const mesh::RoutedPacket &pkt) {

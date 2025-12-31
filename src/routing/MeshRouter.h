@@ -8,7 +8,6 @@
 #include "MeshEvents.h"
 #include "RpcManager.h"
 #include "packet.pb.h"
-#include "RoutedPacketUtils.h"
 #include "ThreadSafeQueue.h"
 
 const uint32_t DEFAULT_TTL = 10;
@@ -57,6 +56,12 @@ public:
 
     void on_peer_disconnected(const std::string &peer_id) override;
 
+    // Could expose a method in the ITransportLayer interface to get the peer id's of the active connection,
+    // but because the router is handling the logic to determine where the packets should go, we should use its view
+    std::vector<std::string> get_direct_neighbors();
+
+    std::vector<std::string> determine_next_hop(const std::string &src_peer, const std::string &dest_peer);
+
 private:
     const std::string self_id_;
     std::weak_ptr<ITransportLayer> transport_;
@@ -64,7 +69,7 @@ private:
     OnMessageReceived on_message_cb_;
 
     std::thread routing_thread_;
-    std::mutex mu_;
+    mutable std::shared_mutex mu_;
     std::atomic_bool running_{false};
 
     ThreadSafeQueue<MeshEvent> event_queue_;
@@ -86,18 +91,23 @@ private:
 
     void handle_packet(const std::string &src_id, mesh::RoutedPacket &pkt);
 
-    void process_routing_update(const std::string &neighbor_id, const mesh::RouteTable &table);
-
-    void route_data_packet(const std::string &from_peer, const std::string &dest_peer, mesh::RoutedPacket &pkt);
-
-    // Maintenance helpers
-    void recalculate_forwarding_table();
+    void route_data_packet(const std::string &src_peer, const std::string &dest_peer, mesh::RoutedPacket &pkt);
 
     void run_periodic_maintenance(std::chrono::steady_clock::time_point time_point);
 
     void send_triggered_updates();
 
     void broadcast_full_table();
+
+    // These methods never lock
+    std::vector<std::string> get_direct_neighbors_locked() const;
+
+    std::vector<std::string> determine_next_hop_locked(const std::string &src_peer, const std::string &dest_peer) const;
+
+    void recalculate_forwarding_table_locked();
+
+    void process_routing_update_locked(const std::string &neighbor_id, const mesh::RouteTable &table);
+
 
     // Debug
     void print_routing_table();
