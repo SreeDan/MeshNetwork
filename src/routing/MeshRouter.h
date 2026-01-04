@@ -4,6 +4,7 @@
 #include <mutex>
 #include <shared_mutex>
 
+#include "AsyncRequestTracker.h"
 #include "IMessageSink.h"
 #include "MeshEvents.h"
 #include "RpcManager.h"
@@ -32,7 +33,8 @@ class MeshRouter : public IMessageSink {
 public:
     using OnMessageReceived = std::function<void(const std::string &from_id, const mesh::RoutedPacket &pkt)>;
 
-    MeshRouter(const std::string &self_id, std::shared_ptr<ITransportLayer> transport = nullptr);
+    MeshRouter(boost::asio::io_context &ioc, const std::string &self_id,
+               const std::shared_ptr<ITransportLayer> &transport = nullptr);
 
     ~MeshRouter();
 
@@ -43,9 +45,18 @@ public:
 
     void stop();
 
+    void send_packet(mesh::RoutedPacket &pkt);
+
     void send_text(const std::string &dest_id, const std::string &text);
 
     void send_bytes(const std::string &dest_id, const std::vector<uint8_t> &bytes);
+
+    std::future<std::string> send_request(mesh::RoutedPacket &pkt, std::chrono::milliseconds timeout);
+
+    void send_broadcast_request(mesh::RoutedPacket &pkt,
+                                std::chrono::milliseconds duration,
+                                std::function<void(const std::string &, std::string)> on_response,
+                                const std::function<void()> &on_complete);
 
     void set_on_message_received(OnMessageReceived cb);
 
@@ -61,6 +72,9 @@ public:
     std::vector<std::string> get_direct_neighbors();
 
     std::vector<std::string> determine_next_hop(const std::string &src_peer, const std::string &dest_peer);
+
+    // Debug
+    void generate_topology_graph(const std::string &destination_path);
 
 private:
     const std::string self_id_;
@@ -86,6 +100,7 @@ private:
     std::chrono::steady_clock::time_point last_periodic_update;
     std::chrono::steady_clock::time_point trigger_deadline_;
     bool trigger_pending_ = false;
+    AsyncRequestTracker<std::string> request_tracker_;
 
     void processing_loop(); // Main event loop
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <boost/asio.hpp>
 
 // T is the type of any response payload (e.g., std::string or mesh::Envelope)
@@ -7,6 +8,35 @@ template<typename T>
 class AsyncRequestTracker {
 public:
     AsyncRequestTracker(boost::asio::io_context &ioc) : ioc_(ioc) {
+    }
+
+    void track_broadcast(const std::string &req_id,
+                         std::chrono::milliseconds duration,
+                         const std::function<void(const std::string &, T)> on_response,
+                         const std::function<void()> &on_complete) {
+        std::lock_guard<std::mutex> lock(mu_);
+
+        auto timer = std::make_shared<boost::asio::steady_timer>(ioc_, duration);
+        // When timer expires, clean up and notify completion
+        timer->async_wait([this, req_id, on_complete](const boost::system::error_code &ec) {
+            // Note: We don't check operation_aborted here usually, because
+            // for broadcasts, "timeout" IS the normal completion signal.
+
+            std::lock_guard<std::mutex> lock(mu_);
+            auto it = broadcasts_.find(req_id);
+            if (it != broadcasts_.end()) {
+                if (on_complete) on_complete(); // Notify caller we are done
+                broadcasts_.erase(it);
+            }
+        });
+
+        broadcasts_.try_emplace(
+            req_id,
+            BroadcastEntry{
+                std::move(on_response),
+                std::move(timer)
+            }
+        );
     }
 
     std::future<T> track_request(const std::string &req_id, std::chrono::milliseconds timeout) {
@@ -26,15 +56,29 @@ public:
         return fut;
     }
 
-    bool fulfill_request(const std::string &req_id, T response) {
+    bool fulfill_request(const std::string &req_id, const std::string &from_id, T payload) {
         std::lock_guard<std::mutex> lock(mu_);
-        auto it = pending_requests_.find(req_id);
-        if (it == pending_requests_.end()) return false;
 
-        it->second.promise.set_value(std::move(response));
-        it->second.timer->cancel();
-        pending_requests_.erase(it);
-        return true;
+        auto it = pending_requests_.find(req_id);
+        if (it != pending_requests_.end()) {
+            it->second.timer->cancel();
+            try {
+                it->second.promise.set_value(std::move(payload));
+            } catch (...) {
+            }
+            pending_requests_.erase(it);
+            return true;
+        }
+
+        auto bit = broadcasts_.find(req_id);
+        if (bit != broadcasts_.end()) {
+            bit->second.callback(from_id, std::move(payload));
+            // Not erasing so we can capture more responses
+            // eventually the timeout will clean it up
+            return true;
+        }
+
+        return false;
     }
 
 private:
@@ -43,9 +87,15 @@ private:
         std::shared_ptr<boost::asio::steady_timer> timer;
     };
 
+    struct BroadcastEntry {
+        std::function<void(const std::string &, T)> callback;
+        std::shared_ptr<boost::asio::steady_timer> timer;
+    };
+
     boost::asio::io_context &ioc_;
     std::mutex mu_;
     std::unordered_map<std::string, PendingRequest> pending_requests_;
+    std::unordered_map<std::string, BroadcastEntry> broadcasts_;
 
     void fail_request(const std::string &req_id, std::exception_ptr e) {
         std::lock_guard<std::mutex> lock(mu_);

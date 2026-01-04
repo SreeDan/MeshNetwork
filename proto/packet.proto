@@ -17,8 +17,10 @@ message RoutedPacket {
   string from_peer_id = 2; // origin
   string to_peer_id = 3; // destination, empty meaning broadcast - everyone should receive the packet
   uint32 ttl = 4;  // # of hops allowed
-
   PacketType type = 5;
+  string subtype = 6; // subtype of message (e.g. "myapp.Message1")
+  bool expect_response = 7;
+
   oneof payload_variant {
     string text = 10;
     RouteTable route_table = 11;

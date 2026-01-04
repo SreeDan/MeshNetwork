@@ -130,7 +130,7 @@ std::future<std::string> RpcConnection::send_message(
         // Only put the promise in pending_requests_ if we expect a response
         // because if we don't expect a response we won't ever get a response.
         std::lock_guard<std::mutex> guard(mu_);
-        pending_requests_[req_id] = Pending{
+        pending_requests_[req_id] = PendingRequest{
             std::move(promise),
             std::move(timer)
         };

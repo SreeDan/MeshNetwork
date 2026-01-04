@@ -1,0 +1,9 @@
+syntax = "proto3";
+package mesh;
+
+message TopologyRequest {
+}
+
+message TopologyResponse {
+  repeated string directly_connected_peers = 1;
+}

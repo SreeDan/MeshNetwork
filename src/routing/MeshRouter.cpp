@@ -1,12 +1,15 @@
 #include "MeshRouter.h"
 
 #include <ranges>
+#include <utility>
 
+#include "GraphManager.h"
 #include "packet.pb.h"
 #include "RoutedPacketUtils.h"
 
-MeshRouter::MeshRouter(const std::string &self_id, std::shared_ptr<ITransportLayer> transport)
-    : self_id_(self_id), transport_(transport) {
+MeshRouter::MeshRouter(boost::asio::io_context &ioc, const std::string &self_id,
+                       const std::shared_ptr<ITransportLayer> &transport)
+    : self_id_(self_id), transport_(transport), request_tracker_(ioc) {
     forwarding_table_[self_id] = RouteEntry{self_id, 0, false};
     last_periodic_update = std::chrono::steady_clock::now();
     std::thread(&MeshRouter::print_routing_table, this).detach();
@@ -129,11 +132,15 @@ void MeshRouter::handle_packet(const std::string &src_id, mesh::RoutedPacket &pk
     if (pkt.type() == mesh::PacketType::ROUTING_UPDATE) {
         std::unique_lock lock(mu_);
         process_routing_update_locked(src_id, pkt.route_table());
-    } else if (pkt.type() == mesh::PacketType::TEXT) {
+    } else if (pkt.type() == mesh::PacketType::TEXT || pkt.type() == mesh::PacketType::BINARY) {
         route_data_packet(src_id, pkt.to_peer_id(), pkt);
     } else {
         std::cerr << "Unknown type " << pkt.type() << std::endl;
     }
+}
+
+void MeshRouter::send_packet(mesh::RoutedPacket &pkt) {
+    route_data_packet(self_id_, pkt.to_peer_id(), pkt);
 }
 
 void MeshRouter::send_text(const std::string &dest_id, const std::string &text) {
@@ -141,9 +148,31 @@ void MeshRouter::send_text(const std::string &dest_id, const std::string &text) 
         self_id_,
         dest_id,
         DEFAULT_TTL,
-        text
+        text,
+        false
     );
     route_data_packet(self_id_, dest_id, pkt);
+}
+
+std::future<std::string> MeshRouter::send_request(mesh::RoutedPacket &pkt, std::chrono::milliseconds timeout) {
+    std::string req_id = pkt.id();
+    pkt.set_expect_response(true);
+
+    // TODO: make timeout a constant
+    auto future = request_tracker_.track_request(req_id, std::chrono::seconds(5));
+
+    route_data_packet(self_id_, pkt.to_peer_id(), pkt);
+    return future;
+}
+
+void MeshRouter::send_broadcast_request(mesh::RoutedPacket &pkt,
+                                        std::chrono::milliseconds duration,
+                                        std::function<void(const std::string &, std::string)> on_response,
+                                        const std::function<void()> &on_complete) {
+    pkt.set_expect_response(true);
+    request_tracker_.track_broadcast(pkt.id(), duration, std::move(on_response), on_complete);
+
+    route_data_packet(self_id_, "", pkt);
 }
 
 std::vector<std::string> MeshRouter::determine_next_hop(const std::string &src_peer, const std::string &dest_peer) {
@@ -172,26 +201,34 @@ std::vector<std::string> MeshRouter::determine_next_hop_locked(const std::string
 
 void MeshRouter::route_data_packet(const std::string &immediate_src, const std::string &dest_peer,
                                    mesh::RoutedPacket &pkt) {
-    // Track visited peers to prevent loops
-    if (seen_ids_.contains(pkt.id())) {
-        std::cerr << "[Router] Detected loop for pkt " << pkt.id() << " — dropping\n";
-        return;
-    }
-    seen_ids_.insert(pkt.id());
-
     const std::string &initial_src = pkt.from_peer_id();
     bool is_broadcast = dest_peer.empty();
     bool is_for_me = {dest_peer == self_id_};
 
+    if (is_for_me && pkt.type() == mesh::PacketType::BINARY) {
+        if (request_tracker_.fulfill_request(pkt.id(), pkt.from_peer_id(), pkt.binary_data())) {
+            return;
+        }
+    }
+
     if (is_broadcast || is_for_me) {
-        // If it's a broadcast message that we send, we shouldn't respond to it
-        if (on_message_cb_ && (!is_broadcast || immediate_src != self_id_)) {
-            // Deliver to user
+        bool is_my_own_msg = (initial_src == self_id_);
+
+        if (on_message_cb_ && !is_my_own_msg) {
             on_message_cb_(initial_src, pkt);
         }
 
-        if (is_for_me) return; // don't route if the message is only for me
+        if (is_for_me) return;
     }
+
+    if (immediate_src != self_id_ && seen_ids_.contains(pkt.id())) {
+        // Only log if it wasn't a broadcast (broadcasts loop frequently by definition)
+        if (!is_broadcast) {
+            std::cerr << "[Router] Loop detected for pkt " << pkt.id() << " — dropping\n";
+        }
+        return;
+    }
+    seen_ids_.insert(pkt.id());
 
     std::vector<std::string> next_peer_ids = determine_next_hop(immediate_src, dest_peer);
 
@@ -204,7 +241,11 @@ void MeshRouter::route_data_packet(const std::string &immediate_src, const std::
         mesh::RoutedPacket forward_pkt = pkt;
         forward_pkt.set_ttl(forward_pkt.ttl() - 1);
 
-        if (forward_pkt.ttl() <= 0) continue;
+        if (forward_pkt.ttl() <= 0) {
+            std::cerr << "[Router] TTL expired for pkt " << pkt.id() << "\n";
+            continue;
+        };
+
 
         mesh::Envelope env;
         env.set_type(mesh::EnvelopeType::DATA);
