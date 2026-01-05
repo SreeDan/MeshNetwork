@@ -69,6 +69,8 @@ public:
     void on(std::function<void(const std::string &from, const T &msg,
                                std::function<void(std::string &)> reply)> handler);
 
+    void ping(const std::string &peer);
+
 private:
     using TypeErasedHandler = std::function<void(const std::string &from,
                                                  const std::string &raw_bytes,
@@ -91,6 +93,8 @@ private:
     void dispatch_message(const std::string &from, const mesh::RoutedPacket &pkt);
 
     void enable_topology_features();
+
+    void enable_ping_features();
 
     void do_accept();
 };

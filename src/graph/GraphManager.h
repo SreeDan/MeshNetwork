@@ -18,7 +18,7 @@ public:
 
     Vertex get_or_add_vertex(const std::string &vertex);
 
-    void save_graph(std::string destination_path);
+    void save_graph(const std::string &destination_path);
 
 private:
     UndirectedStringGraph graph_;

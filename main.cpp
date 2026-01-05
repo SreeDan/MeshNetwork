@@ -65,6 +65,13 @@ int main(int argc, char **argv) {
                 std::cout << "Usage: topology <output_path>\n";
             }
             node.generate_topology_graph(dest);
+        } else if (line.starts_with("ping")) {
+            std::string arg = line.substr(std::string("ping").size());
+            std::istringstream iss(arg);
+
+            std::string peer;
+            iss >> peer;
+            node.ping(peer);
         } else if (line == "quit" || line == "exit") break;
         else std::cout << "Commands: broadcast <text>, dm <peer> <text>, exit\n";
     }
