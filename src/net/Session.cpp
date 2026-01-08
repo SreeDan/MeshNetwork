@@ -15,17 +15,17 @@
 using namespace boost::asio;
 
 
-class Session : public ISession {
+class GenericSession : public ISession {
 public:
-    Session(boost::asio::io_context &ioc, std::unique_ptr<StreamLayer> stream, ReadMessageHandler handler)
+    GenericSession(boost::asio::io_context &ioc, std::unique_ptr<StreamLayer> stream, ReadMessageHandler handler)
         : ioc_(ioc),
           strand_(make_strand(ioc)),
           stream_(std::move(stream)),
           response_handler_(std::move(handler)) {
     }
 
-    ~Session() override {
-        stop();
+    ~GenericSession() override {
+        GenericSession::stop();
     }
 
     void start() override {
@@ -174,8 +174,14 @@ private:
     }
 };
 
-std::shared_ptr<ISession> make_plain_session(io_context &ioc, ip::tcp::socket sock, ReadMessageHandler handler) {
+std::shared_ptr<ISession> make_tcp_session(io_context &ioc, ip::tcp::socket sock, ReadMessageHandler handler) {
     auto stream = std::make_unique<TcpStream>(std::move(sock));
-    return std::make_shared<Session>(ioc, std::move(stream), handler);
-    // return std::make_shared<PlainSession>(ioc, std::move(sock), handler);
+    return std::make_shared<GenericSession>(ioc, std::move(stream), handler);
 }
+
+std::shared_ptr<ISession> make_ssl_session(boost::asio::io_context &ioc, boost::asio::ip::tcp::socket sock,
+                                           boost::asio::ssl::context &ctx, bool is_server, ReadMessageHandler handler) {
+    auto stream = std::make_unique<SslStream>(std::move(sock), ctx, is_server);
+    return std::make_shared<GenericSession>(ioc, std::move(stream), handler);
+}
+

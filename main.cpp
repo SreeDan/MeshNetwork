@@ -5,6 +5,42 @@
 
 #include "mesh_node.h"
 
+
+std::shared_ptr<boost::asio::ssl::context> make_ssl_context(
+    const std::string &cert_file,
+    const std::string &key_file,
+    const std::string &ca_file
+) {
+    try {
+        std::shared_ptr<boost::asio::ssl::context> ssl_ctx;
+
+        // initialize context for TLS v1.2 or v1.3
+        ssl_ctx = std::make_shared<boost::asio::ssl::context>(boost::asio::ssl::context::tls_server);
+
+        ssl_ctx->set_options(
+            boost::asio::ssl::context::default_workarounds |
+            boost::asio::ssl::context::no_sslv2 |
+            boost::asio::ssl::context::single_dh_use
+        );
+
+        // Load certificates from the file paths
+        ssl_ctx->use_certificate_chain_file(cert_file);
+        ssl_ctx->use_private_key_file(key_file, boost::asio::ssl::context::pem);
+
+        // If you need to verify peers (mutual TLS), load the CA
+        if (!ca_file.empty()) {
+            ssl_ctx->load_verify_file(ca_file);
+            ssl_ctx->set_verify_mode(boost::asio::ssl::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
+        }
+
+        std::cout << "TLS Context initialized successfully." << std::endl;
+
+        return ssl_ctx;
+    } catch (const std::exception &e) {
+        throw std::runtime_error("TLS Setup Failed: " + std::string(e.what()));
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc < 4) {
         std::cerr << "Usage: meshnode <tcp_port> <udp_discovery_port> <peer_id> [--tls cert key ca]\n";
@@ -24,7 +60,18 @@ int main(int argc, char **argv) {
     }
 
     boost::asio::io_context ioc;
-    MeshNode node(ioc, tcp_port, udp_port, peer_id);
+
+    std::shared_ptr<boost::asio::ssl::context> ssl_ctx = nullptr;
+    if (use_tls) {
+        try {
+            ssl_ctx = make_ssl_context(cert, key, ca);
+        } catch (const std::exception &e) {
+            std::cerr << e.what() << std::endl;
+            return 1;
+        }
+    }
+
+    MeshNode node(ioc, tcp_port, udp_port, peer_id, ssl_ctx);
 
     node.set_output_directory(std::filesystem::current_path() / "out");
 

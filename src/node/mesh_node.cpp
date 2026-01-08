@@ -8,10 +8,20 @@
 #include "GraphManager.h"
 #include "ping.pb.h"
 
-MeshNode::MeshNode(boost::asio::io_context &ioc, const int tcp_port, const int udp_port, const std::string &peer_id)
-    : ioc_(ioc), tcp_port_(tcp_port), udp_port_(udp_port), peer_id_(peer_id),
+MeshNode::MeshNode(
+    boost::asio::io_context &ioc,
+    const int tcp_port,
+    const int udp_port,
+    const std::string &peer_id,
+    std::shared_ptr<boost::asio::ssl::context> ssl_ctx)
+    : ioc_(ioc),
       acceptor_(ioc),
-      rpc_connections(std::make_shared<RpcManager>(ioc, peer_id)), router_(std::make_shared<MeshRouter>(ioc, peer_id)) {
+      tcp_port_(tcp_port),
+      udp_port_(udp_port),
+      peer_id_(peer_id),
+      ssl_ctx_(std::move(ssl_ctx)),
+      rpc_connections(std::make_shared<RpcManager>(ioc, peer_id)),
+      router_(std::make_shared<MeshRouter>(ioc, peer_id)) {
     boost::system::error_code ec;
 
     acceptor_.open(boost::asio::ip::tcp::v4(), ec);

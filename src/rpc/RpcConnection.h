@@ -18,7 +18,8 @@ struct PendingRequest {
 class RpcConnection : public std::enable_shared_from_this<RpcConnection> {
 public:
     RpcConnection(boost::asio::io_context &ioc, boost::asio::ip::tcp::socket sock, const std::string &peer_id,
-                  const boost::asio::ip::tcp::endpoint &local_ep, const boost::asio::ip::tcp::endpoint &remote_ep);
+                  const boost::asio::ip::tcp::endpoint &local_ep, const boost::asio::ip::tcp::endpoint &remote_ep,
+                  const std::shared_ptr<boost::asio::ssl::context> &ssl_ctx);
 
     ~RpcConnection();
 
@@ -61,6 +62,7 @@ private:
     boost::asio::ip::tcp::socket sock_;
 
     const std::string peer_id_;
+    std::shared_ptr<boost::asio::ssl::context> ssl_ctx_;
     std::string authenticated_remote_id_;
 
     std::shared_ptr<std::promise<std::expected<mesh::PeerRecord, std::string> > > handshake_promise_;
