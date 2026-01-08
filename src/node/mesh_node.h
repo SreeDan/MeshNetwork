@@ -2,12 +2,9 @@
 #include <string>
 #include <boost/asio.hpp>
 
-#include "discovery.h"
 #include "MeshRouter.h"
-#include "RpcConnection.h"
 #include "RpcManager.h"
 #include "topology.pb.h"
-#include "net/session.h"
 
 
 class MeshNode {

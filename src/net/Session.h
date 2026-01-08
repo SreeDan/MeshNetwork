@@ -5,14 +5,12 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/uuid/uuid.hpp>
 
-#include "messages.pb.h"
-
 using ReadMessageHandler = std::function<void(const boost::uuids::uuid &, const std::string &)>;
 
 struct ISession : std::enable_shared_from_this<ISession> {
     virtual ~ISession() = default;
 
-    virtual boost::asio::ip::basic_endpoint<boost::asio::ip::tcp> start() = 0;
+    virtual void start() = 0;
 
     virtual void stop() = 0;
 
