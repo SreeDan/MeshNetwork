@@ -6,11 +6,22 @@
 
 #include "EnvelopeUtils.h"
 #include "GraphManager.h"
+#include "ping.pb.h"
 
-MeshNode::MeshNode(boost::asio::io_context &ioc, const int tcp_port, const int udp_port, const std::string &peer_id)
-    : ioc_(ioc), tcp_port_(tcp_port), udp_port_(udp_port), peer_id_(peer_id),
+MeshNode::MeshNode(
+    boost::asio::io_context &ioc,
+    const int tcp_port,
+    const int udp_port,
+    const std::string &peer_id,
+    std::shared_ptr<boost::asio::ssl::context> ssl_ctx)
+    : ioc_(ioc),
       acceptor_(ioc),
-      rpc_connections(std::make_shared<RpcManager>(ioc, peer_id)), router_(std::make_shared<MeshRouter>(ioc, peer_id)) {
+      tcp_port_(tcp_port),
+      udp_port_(udp_port),
+      peer_id_(peer_id),
+      ssl_ctx_(std::move(ssl_ctx)),
+      rpc_connections(std::make_shared<RpcManager>(ioc, peer_id)),
+      router_(std::make_shared<MeshRouter>(ioc, peer_id)) {
     boost::system::error_code ec;
 
     acceptor_.open(boost::asio::ip::tcp::v4(), ec);
@@ -42,6 +53,7 @@ MeshNode::MeshNode(boost::asio::io_context &ioc, const int tcp_port, const int u
 
 void MeshNode::start() {
     enable_topology_features();
+    enable_ping_features();
     do_accept();
 }
 
@@ -66,6 +78,18 @@ void MeshNode::enable_topology_features() {
         }
     );
 }
+
+void MeshNode::enable_ping_features() {
+    on<mesh::PingRequest>(
+        [this](const std::string &from, const mesh::PingRequest &req, auto reply) {
+            mesh::PingResponse resp;
+            std::string bytes = resp.SerializeAsString();
+            std::cout << "ping from " << from << std::endl;
+            reply(bytes);
+        }
+    );
+}
+
 
 void MeshNode::do_accept() {
     acceptor_.async_accept([this](boost::system::error_code ec, boost::asio::ip::tcp::socket sock) {
@@ -197,6 +221,19 @@ void MeshNode::on(std::function<void(const std::string &from, const T &msg,
             std::cerr << "Failed to parse " << T::descriptor()->full_name() << std::endl;
         }
     };
+}
+
+void MeshNode::ping(const std::string &peer) {
+    mesh::PingRequest req;
+    auto future = send_request<mesh::PingResponse>(peer, req);
+
+    std::pair<std::string, mesh::PingResponse> resp;
+    try {
+        resp = future.get();
+        std::cout << "pong from " << resp.first << std::endl;
+    } catch (const std::exception &e) {
+        std::cerr << "Ping request failed: " << e.what() << std::endl;
+    }
 }
 
 void MeshNode::handle_received_message(const std::string &from, const mesh::RoutedPacket &pkt) {

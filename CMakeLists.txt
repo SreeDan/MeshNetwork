@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 23)
 
 find_package(Protobuf REQUIRED)
 find_package(Boost 1.70 REQUIRED COMPONENTS filesystem system)
+find_package(OpenSSL REQUIRED)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -22,8 +23,8 @@ protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
 
 add_executable(MeshNetworking main.cpp
         src/node/mesh_node.cpp
-        src/net/session.cpp
-        src/net/discovery.cpp
+        src/net/Session.cpp
+        src/net/Stream.cpp
         src/rpc/RpcConnection.cpp
         src/rpc/RpcManager.cpp
         src/rpc/handlers/HandshakeHandler.cpp
@@ -54,5 +55,7 @@ target_include_directories(MeshNetworking PRIVATE
 target_link_libraries(MeshNetworking PRIVATE
         ${Boost_LIBRARIES}
         ${Protobuf_LIBRARIES}
+        OpenSSL::SSL
+        OpenSSL::Crypto
 )
 

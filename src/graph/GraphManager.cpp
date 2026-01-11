@@ -27,7 +27,7 @@ Vertex UndirectedGraphManager::get_or_add_vertex(const std::string &vertex) {
     return v;
 }
 
-void UndirectedGraphManager::save_graph(std::string destination_path) {
+void UndirectedGraphManager::save_graph(const std::string &destination_path) {
     std::filesystem::path path = destination_path;
     if (path.extension() != ".dot") {
         path.replace_extension(".dot");

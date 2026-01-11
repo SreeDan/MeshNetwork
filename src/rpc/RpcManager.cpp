@@ -1,6 +1,7 @@
 #include "RpcManager.h"
 
 #include <expected>
+#include <utility>
 
 #include "EnvelopeUtils.h"
 #include "handlers/HandshakeHandler.h"
@@ -8,8 +9,8 @@
 #include "packet.pb.h"
 
 RpcManager::RpcManager(boost::asio::io_context &ioc, const std::string &peer_id,
-                       std::shared_ptr<IMessageSink> sink)
-    : ioc_(ioc), peer_id_(peer_id), sink_(sink) {
+                       std::shared_ptr<IMessageSink> sink, std::shared_ptr<boost::asio::ssl::context> ssl_ctx)
+    : ioc_(ioc), peer_id_(peer_id), sink_(sink), ssl_ctx_(std::move(ssl_ctx)) {
     register_handlers();
     using namespace std::chrono_literals;
     heartbeat_thread_ = std::thread([this] { send_heartbeats(300ms); });
@@ -20,10 +21,9 @@ void RpcManager::register_handlers() {
     handlers_[mesh::EnvelopeType::HEARTBEAT] = std::make_unique<HeartbeatHandler>();
 }
 
-RpcManager::~RpcManager() {
-}
+RpcManager::~RpcManager() = default;
 
-void RpcManager::set_sink(std::shared_ptr<IMessageSink> sink) {
+void RpcManager::set_sink(const std::shared_ptr<IMessageSink> &sink) {
     sink_ = sink;
 }
 
@@ -37,7 +37,7 @@ std::expected<std::string, std::string> RpcManager::create_connection(const std:
     }
     auto local_endpoint = sock.local_endpoint();
     auto rpc_connection = std::make_shared<RpcConnection>(ioc_, std::move(sock), peer_id_, local_endpoint,
-                                                          remote_ep);
+                                                          remote_ep, ssl_ctx_);
     rpc_connection->set_on_dispatch([this](auto conn, const auto &env) {
         this->dispatch_message(conn, env);
     });
@@ -64,7 +64,8 @@ void RpcManager::accept_connection(const std::string &remote_addr, boost::asio::
     auto remote_ep = sock.remote_endpoint();
     auto local_ep = sock.local_endpoint();
 
-    auto rpc_connection = std::make_shared<RpcConnection>(ioc_, std::move(sock), peer_id_, local_ep, remote_ep);
+    auto rpc_connection = std::make_shared<RpcConnection>(ioc_, std::move(sock), peer_id_, local_ep, remote_ep,
+                                                          ssl_ctx_);
     rpc_connection->set_on_dispatch([this](auto conn, const auto &env) {
         this->dispatch_message(conn, env);
     });
@@ -166,17 +167,6 @@ void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
 
             auto result = conn->send_message(env, timeout);
             futures.insert({peer, std::move(result)});
-            /*
-                   mesh::PeerIP local_ip = conn->get_local_peer_ip();
-                   mesh::PeerIP remote_ip = conn->get_remote_peer_ip();
-                   auto env = mesh::envelope::MakeHeartbeatRequest(local_ip, remote_ip);
-                   auto result = send_message(peer, env);
-                   if (!result.has_value()) {
-                       continue;
-                   }
-
-                   futures.insert({peer, std::move(result.value())});
-                   */
         }
 
         for (auto &pair: futures) {

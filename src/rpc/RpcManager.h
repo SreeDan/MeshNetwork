@@ -13,9 +13,12 @@ namespace rpc {
 class RpcManager : public std::enable_shared_from_this<RpcManager>, public ITransportLayer {
 public:
     RpcManager(boost::asio::io_context &ioc, const std::string &peer_id,
-               std::shared_ptr<IMessageSink> sink = nullptr);
+               std::shared_ptr<IMessageSink> sink = nullptr,
+               std::shared_ptr<boost::asio::ssl::context> ssl_ctx = nullptr);
 
     ~RpcManager();
+
+    void set_sink(const std::shared_ptr<IMessageSink> &sink);
 
     std::expected<std::string, std::string> create_connection(const std::string &remote_addr,
                                                               boost::asio::ip::tcp::socket sock);
@@ -33,16 +36,15 @@ public:
 
     void send_heartbeats(std::chrono::milliseconds timeout);
 
-    void set_sink(std::shared_ptr<IMessageSink> sink);
-
 private:
     boost::asio::io_context &ioc_;
     const std::string &peer_id_;
+    std::weak_ptr<IMessageSink> sink_;
+    std::shared_ptr<boost::asio::ssl::context> ssl_ctx_;
     std::mutex mu_;
     std::unordered_map<std::string, std::shared_ptr<RpcConnection> > connections_;
     std::thread heartbeat_thread_;
     std::unordered_map<mesh::EnvelopeType, std::unique_ptr<IRpcMessageHandler> > handlers_;
-    std::weak_ptr<IMessageSink> sink_;
 
     void register_handlers();
 

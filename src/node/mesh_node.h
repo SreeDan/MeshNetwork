@@ -2,17 +2,19 @@
 #include <string>
 #include <boost/asio.hpp>
 
-#include "discovery.h"
 #include "MeshRouter.h"
-#include "RpcConnection.h"
 #include "RpcManager.h"
 #include "topology.pb.h"
-#include "net/session.h"
 
 
 class MeshNode {
 public:
-    MeshNode(boost::asio::io_context &ioc, int tcp_port, int udp_port, const std::string &peer_id);
+    MeshNode(
+        boost::asio::io_context &ioc,
+        int tcp_port,
+        int udp_port,
+        const std::string &peer_id,
+        std::shared_ptr<boost::asio::ssl::context> ssl_ctx);
 
     void start();
 
@@ -69,6 +71,8 @@ public:
     void on(std::function<void(const std::string &from, const T &msg,
                                std::function<void(std::string &)> reply)> handler);
 
+    void ping(const std::string &peer);
+
 private:
     using TypeErasedHandler = std::function<void(const std::string &from,
                                                  const std::string &raw_bytes,
@@ -81,6 +85,7 @@ private:
     int tcp_port_;
     int udp_port_;
     std::string peer_id_;
+    std::shared_ptr<boost::asio::ssl::context> ssl_ctx_;
     std::string output_directory_;
 
     std::shared_ptr<RpcManager> rpc_connections;
@@ -91,6 +96,8 @@ private:
     void dispatch_message(const std::string &from, const mesh::RoutedPacket &pkt);
 
     void enable_topology_features();
+
+    void enable_ping_features();
 
     void do_accept();
 };

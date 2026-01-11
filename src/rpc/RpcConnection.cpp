@@ -13,8 +13,10 @@ using namespace std::chrono_literals;
 
 RpcConnection::RpcConnection(boost::asio::io_context &ioc, boost::asio::ip::tcp::socket sock,
                              const std::string &peer_id, const boost::asio::ip::tcp::endpoint &local_ep,
-                             const boost::asio::ip::tcp::endpoint &remote_ep)
-    : ioc_(ioc), sock_(std::move(sock)), peer_id_(peer_id), local_endpoint_(local_ep), remote_endpoint_(remote_ep) {
+                             const boost::asio::ip::tcp::endpoint &remote_ep,
+                             const std::shared_ptr<boost::asio::ssl::context> &ssl_ctx)
+    : ioc_(ioc), sock_(std::move(sock)), peer_id_(peer_id), local_endpoint_(local_ep), remote_endpoint_(remote_ep),
+      ssl_ctx_(ssl_ctx) {
 }
 
 RpcConnection::~RpcConnection() {
@@ -37,10 +39,17 @@ RpcConnection::~RpcConnection() {
 std::expected<mesh::PeerRecord, std::string> RpcConnection::start(bool initiator) {
     auto self = shared_from_this();
     handshake_promise_ = std::make_shared<std::promise<std::expected<mesh::PeerRecord, std::string> > >();
-    session_ = make_plain_session(ioc_, std::move(sock_),
-                                  [self](const boost::uuids::uuid &msg_id, const std::string &payload) {
-                                      self->on_message(msg_id, payload);
-                                  });
+    if (ssl_ctx_ == nullptr) {
+        session_ = make_tcp_session(ioc_, std::move(sock_),
+                                    [self](const boost::uuids::uuid &msg_id, const std::string &payload) {
+                                        self->on_message(msg_id, payload);
+                                    });
+    } else {
+        session_ = make_ssl_session(ioc_, std::move(sock_), *ssl_ctx_, initiator,
+                                    [self](const boost::uuids::uuid &msg_id, const std::string &payload) {
+                                        self->on_message(msg_id, payload);
+                                    });
+    }
     session_->start();
 
     if (initiator) {
