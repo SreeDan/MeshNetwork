@@ -10,7 +10,7 @@
 
 using namespace std::chrono_literals;
 
-struct Pending {
+struct PendingRequest {
     std::promise<std::string> prom;
     std::unique_ptr<boost::asio::steady_timer> timer;
 };
@@ -67,7 +67,7 @@ private:
 
     // Guards pending_requests_
     std::mutex mu_;
-    std::unordered_map<std::string, Pending> pending_requests_;
+    std::unordered_map<std::string, PendingRequest> pending_requests_;
     std::shared_ptr<ISession> session_;
     std::function<void(std::shared_ptr<RpcConnection>, const mesh::Envelope &)> handler_cb_;
 

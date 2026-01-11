@@ -4,11 +4,11 @@
 #include <mutex>
 #include <shared_mutex>
 
+#include "AsyncRequestTracker.h"
 #include "IMessageSink.h"
 #include "MeshEvents.h"
 #include "RpcManager.h"
 #include "packet.pb.h"
-#include "RoutedPacketUtils.h"
 #include "ThreadSafeQueue.h"
 
 const uint32_t DEFAULT_TTL = 10;
@@ -33,7 +33,8 @@ class MeshRouter : public IMessageSink {
 public:
     using OnMessageReceived = std::function<void(const std::string &from_id, const mesh::RoutedPacket &pkt)>;
 
-    MeshRouter(const std::string &self_id, std::shared_ptr<ITransportLayer> transport = nullptr);
+    MeshRouter(boost::asio::io_context &ioc, const std::string &self_id,
+               const std::shared_ptr<ITransportLayer> &transport = nullptr);
 
     ~MeshRouter();
 
@@ -44,9 +45,18 @@ public:
 
     void stop();
 
+    void send_packet(mesh::RoutedPacket &pkt);
+
     void send_text(const std::string &dest_id, const std::string &text);
 
     void send_bytes(const std::string &dest_id, const std::vector<uint8_t> &bytes);
+
+    std::future<std::string> send_request(mesh::RoutedPacket &pkt, std::chrono::milliseconds timeout);
+
+    void send_broadcast_request(mesh::RoutedPacket &pkt,
+                                std::chrono::milliseconds duration,
+                                std::function<void(const std::string &, std::string)> on_response,
+                                const std::function<void()> &on_complete);
 
     void set_on_message_received(OnMessageReceived cb);
 
@@ -57,6 +67,15 @@ public:
 
     void on_peer_disconnected(const std::string &peer_id) override;
 
+    // Could expose a method in the ITransportLayer interface to get the peer id's of the active connection,
+    // but because the router is handling the logic to determine where the packets should go, we should use its view
+    std::vector<std::string> get_direct_neighbors();
+
+    std::vector<std::string> determine_next_hop(const std::string &src_peer, const std::string &dest_peer);
+
+    // Debug
+    void generate_topology_graph(const std::string &destination_path);
+
 private:
     const std::string self_id_;
     std::weak_ptr<ITransportLayer> transport_;
@@ -64,7 +83,7 @@ private:
     OnMessageReceived on_message_cb_;
 
     std::thread routing_thread_;
-    std::mutex mu_;
+    mutable std::shared_mutex mu_;
     std::atomic_bool running_{false};
 
     ThreadSafeQueue<MeshEvent> event_queue_;
@@ -81,23 +100,29 @@ private:
     std::chrono::steady_clock::time_point last_periodic_update;
     std::chrono::steady_clock::time_point trigger_deadline_;
     bool trigger_pending_ = false;
+    AsyncRequestTracker<std::string> request_tracker_;
 
     void processing_loop(); // Main event loop
 
     void handle_packet(const std::string &src_id, mesh::RoutedPacket &pkt);
 
-    void process_routing_update(const std::string &neighbor_id, const mesh::RouteTable &table);
-
-    void route_data_packet(const std::string &from_peer, const std::string &dest_peer, mesh::RoutedPacket &pkt);
-
-    // Maintenance helpers
-    void recalculate_forwarding_table();
+    void route_data_packet(const std::string &src_peer, const std::string &dest_peer, mesh::RoutedPacket &pkt);
 
     void run_periodic_maintenance(std::chrono::steady_clock::time_point time_point);
 
     void send_triggered_updates();
 
     void broadcast_full_table();
+
+    // These methods never lock
+    std::vector<std::string> get_direct_neighbors_locked() const;
+
+    std::vector<std::string> determine_next_hop_locked(const std::string &src_peer, const std::string &dest_peer) const;
+
+    void recalculate_forwarding_table_locked();
+
+    void process_routing_update_locked(const std::string &neighbor_id, const mesh::RouteTable &table);
+
 
     // Debug
     void print_routing_table();

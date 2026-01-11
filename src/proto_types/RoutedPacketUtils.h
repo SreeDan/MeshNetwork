@@ -1,3 +1,5 @@
+#pragma once
+
 #include <optional>
 #include <string>
 
@@ -11,14 +13,17 @@ namespace mesh {
             std::string from_peer_id,
             std::string to_peer_id,
             uint32_t ttl,
-            std::string payload
+            std::string payload,
+            bool expect_response = false
         );
 
         RoutedPacket MakeBinaryRoutedPacket(
             std::string from_peer_id,
             std::string to_peer_id,
             uint32_t ttl,
-            std::vector<uint8_t> raw_data
+            std::string subtype,
+            std::string raw_data,
+            bool expect_response = false
         );
 
         RoutedPacket MakeRoutingTableRoutedPacket(

@@ -6,7 +6,7 @@
 #include <optional>
 #include <boost/uuid/uuid_io.hpp>
 
-#include "async_writer.h"
+#include "AsyncWriter.h"
 #include "session.h"
 
 using namespace boost::asio;
@@ -71,7 +71,6 @@ public:
 
         data->insert(data->end(), len_ptr, len_ptr + sizeof(payload_len));
         data->insert(data->end(), message.begin(), message.end());
-        std::cout << std::endl;
         write_queue_->write(std::move(data));
     }
 

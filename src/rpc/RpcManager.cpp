@@ -5,7 +5,6 @@
 #include "EnvelopeUtils.h"
 #include "handlers/HandshakeHandler.h"
 #include "handlers/HeartbeatHandler.h"
-#include "handlers/TextHandler.h"
 #include "packet.pb.h"
 
 RpcManager::RpcManager(boost::asio::io_context &ioc, const std::string &peer_id,
@@ -19,7 +18,6 @@ RpcManager::RpcManager(boost::asio::io_context &ioc, const std::string &peer_id,
 void RpcManager::register_handlers() {
     handlers_[mesh::EnvelopeType::HANDSHAKE] = std::make_unique<HandshakeHandler>();
     handlers_[mesh::EnvelopeType::HEARTBEAT] = std::make_unique<HeartbeatHandler>();
-    // handlers_[mesh::EnvelopeType::DATA] = std::make_unique<TextHandler>();
 }
 
 RpcManager::~RpcManager() {
@@ -216,7 +214,4 @@ void RpcManager::dispatch_message(std::shared_ptr<RpcConnection> conn, const mes
             s->push_data_bytes(conn->get_remote_peer_id(), envelope.payload());
         }
     }
-
-    // if (envelope.type() != mesh::EnvelopeType::HANDSHAKE) {
-    // }
 };

@@ -18,7 +18,8 @@ namespace mesh {
             std::string from_peer_id,
             std::string to_peer_id,
             uint32_t ttl,
-            std::string payload
+            std::string payload,
+            bool expect_response
         ) {
             RoutedPacket pkt;
             pkt.set_id(gen_uuid().data, 16);
@@ -27,6 +28,7 @@ namespace mesh {
             pkt.set_ttl(ttl);
             pkt.set_type(PacketType::TEXT);
             pkt.set_text(payload);
+            pkt.set_expect_response(expect_response);
             return pkt;
         }
 
@@ -34,7 +36,9 @@ namespace mesh {
             std::string from_peer_id,
             std::string to_peer_id,
             uint32_t ttl,
-            std::vector<uint8_t> raw_data
+            std::string subtype,
+            std::string raw_data,
+            bool expect_response
         ) {
             RoutedPacket pkt;
             pkt.set_id(gen_uuid().data, 16);
@@ -42,7 +46,9 @@ namespace mesh {
             pkt.set_to_peer_id(to_peer_id);
             pkt.set_ttl(ttl);
             pkt.set_type(PacketType::BINARY);
+            pkt.set_subtype(subtype);
             pkt.set_binary_data(raw_data.data(), raw_data.size());
+            pkt.set_expect_response(expect_response);
             return pkt;
         }
 

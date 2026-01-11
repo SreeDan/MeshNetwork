@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <iostream>
 #include <thread>
 #include <boost/asio.hpp>
@@ -25,6 +26,8 @@ int main(int argc, char **argv) {
     boost::asio::io_context ioc;
     MeshNode node(ioc, tcp_port, udp_port, peer_id);
 
+    node.set_output_directory(std::filesystem::current_path() / "out");
+
     node.start();
 
     std::thread t([&ioc]() { ioc.run(); });
@@ -51,6 +54,17 @@ int main(int argc, char **argv) {
             }
         } else if (line.rfind("broadcast ", 0) == 0) {
             // node.broadcast_text(line.substr(10));
+        } else if (line.starts_with("topology")) {
+            std::string arg = line.substr(std::string("topology").size());
+            std::istringstream iss(arg);
+
+            std::string dest;
+            iss >> dest;
+
+            if (dest.empty()) {
+                std::cout << "Usage: topology <output_path>\n";
+            }
+            node.generate_topology_graph(dest);
         } else if (line == "quit" || line == "exit") break;
         else std::cout << "Commands: broadcast <text>, dm <peer> <text>, exit\n";
     }

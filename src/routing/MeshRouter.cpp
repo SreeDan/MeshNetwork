@@ -1,10 +1,15 @@
 #include "MeshRouter.h"
 
+#include <ranges>
+#include <utility>
+
+#include "GraphManager.h"
 #include "packet.pb.h"
 #include "RoutedPacketUtils.h"
 
-MeshRouter::MeshRouter(const std::string &self_id, std::shared_ptr<ITransportLayer> transport)
-    : self_id_(self_id), transport_(transport) {
+MeshRouter::MeshRouter(boost::asio::io_context &ioc, const std::string &self_id,
+                       const std::shared_ptr<ITransportLayer> &transport)
+    : self_id_(self_id), transport_(transport), request_tracker_(ioc) {
     forwarding_table_[self_id] = RouteEntry{self_id, 0, false};
     last_periodic_update = std::chrono::steady_clock::now();
     std::thread(&MeshRouter::print_routing_table, this).detach();
@@ -51,6 +56,23 @@ void MeshRouter::on_peer_disconnected(const std::string &peer_id) {
     event_queue_.push({EventType::PEER_DISCONNECTED, peer_id, {}});
 }
 
+std::vector<std::string> MeshRouter::get_direct_neighbors() {
+    std::shared_lock lock(mu_);
+    return get_direct_neighbors_locked();
+}
+
+std::vector<std::string> MeshRouter::get_direct_neighbors_locked() const {
+    std::vector<std::string> neighbors;
+    neighbors.reserve(neighbor_views_.size());
+    for (const auto &[id, _]: neighbor_views_) {
+        if (id != self_id_) {
+            neighbors.push_back(id);
+        }
+    }
+
+    return neighbors;
+}
+
 void MeshRouter::processing_loop() {
     const auto MAINTENANCE_TICK_RATE = std::chrono::milliseconds(100);
     auto next_maintenance_time = std::chrono::steady_clock::now() + MAINTENANCE_TICK_RATE;
@@ -71,12 +93,14 @@ void MeshRouter::processing_loop() {
             auto &event = *event_opt;
             if (event.type == EventType::PEER_CONNECTED) {
                 std::cout << "[Router] Peer connected " << event.peer_id << std::endl;
+                std::unique_lock lock(mu_);
                 neighbor_views_[event.peer_id].last_heard_from = std::chrono::steady_clock::now();
-                recalculate_forwarding_table();
+                recalculate_forwarding_table_locked();
             } else if (event.type == EventType::PEER_DISCONNECTED) {
                 std::cout << "[Router] Peer disconnected " << event.peer_id << std::endl;
+                std::unique_lock lock(mu_);
                 neighbor_views_.erase(event.peer_id);
-                recalculate_forwarding_table();
+                recalculate_forwarding_table_locked();
             } else if (event.type == EventType::PACKET_RECEIVED) {
                 handle_packet(event.peer_id, event.packet);
             }
@@ -85,10 +109,7 @@ void MeshRouter::processing_loop() {
 
         now = std::chrono::steady_clock::now();
         if (now >= next_maintenance_time) {
-            {
-                std::lock_guard<std::mutex> lock(mu_);
-                run_periodic_maintenance(std::chrono::steady_clock::time_point());
-            }
+            run_periodic_maintenance(std::chrono::steady_clock::time_point());
             next_maintenance_time = now + MAINTENANCE_TICK_RATE;
         }
     }
@@ -102,19 +123,24 @@ void MeshRouter::handle_packet(const std::string &src_id, mesh::RoutedPacket &pk
     }
 
     {
-        std::lock_guard<std::mutex> lock(mu_);
+        std::unique_lock lock(mu_);
         if (neighbor_views_.contains(src_id)) {
             neighbor_views_[src_id].last_heard_from = std::chrono::steady_clock::now();
         }
     }
 
     if (pkt.type() == mesh::PacketType::ROUTING_UPDATE) {
-        process_routing_update(src_id, pkt.route_table());
-    } else if (pkt.type() == mesh::PacketType::TEXT) {
-        route_data_packet(pkt.from_peer_id(), pkt.to_peer_id(), pkt);
+        std::unique_lock lock(mu_);
+        process_routing_update_locked(src_id, pkt.route_table());
+    } else if (pkt.type() == mesh::PacketType::TEXT || pkt.type() == mesh::PacketType::BINARY) {
+        route_data_packet(src_id, pkt.to_peer_id(), pkt);
     } else {
         std::cerr << "Unknown type " << pkt.type() << std::endl;
     }
+}
+
+void MeshRouter::send_packet(mesh::RoutedPacket &pkt) {
+    route_data_packet(self_id_, pkt.to_peer_id(), pkt);
 }
 
 void MeshRouter::send_text(const std::string &dest_id, const std::string &text) {
@@ -122,72 +148,118 @@ void MeshRouter::send_text(const std::string &dest_id, const std::string &text) 
         self_id_,
         dest_id,
         DEFAULT_TTL,
-        text
+        text,
+        false
     );
     route_data_packet(self_id_, dest_id, pkt);
 }
 
-void MeshRouter::route_data_packet(const std::string &from_peer, const std::string &dest_peer,
-                                   mesh::RoutedPacket &pkt) {
-    if (dest_peer == self_id_) {
-        std::cout << "[Router] Message for ME from " << from_peer << std::endl;
-        if (on_message_cb_) {
-            // Deliver to user
-            on_message_cb_(from_peer, pkt);
-        }
-        return;
+std::future<std::string> MeshRouter::send_request(mesh::RoutedPacket &pkt, std::chrono::milliseconds timeout) {
+    std::string req_id = pkt.id();
+    pkt.set_expect_response(true);
+
+    // TODO: make timeout a constant
+    auto future = request_tracker_.track_request(req_id, std::chrono::seconds(5));
+
+    route_data_packet(self_id_, pkt.to_peer_id(), pkt);
+    return future;
+}
+
+void MeshRouter::send_broadcast_request(mesh::RoutedPacket &pkt,
+                                        std::chrono::milliseconds duration,
+                                        std::function<void(const std::string &, std::string)> on_response,
+                                        const std::function<void()> &on_complete) {
+    pkt.set_expect_response(true);
+    request_tracker_.track_broadcast(pkt.id(), duration, std::move(on_response), on_complete);
+
+    route_data_packet(self_id_, "", pkt);
+}
+
+std::vector<std::string> MeshRouter::determine_next_hop(const std::string &src_peer, const std::string &dest_peer) {
+    std::shared_lock lock(mu_);
+    return determine_next_hop_locked(src_peer, dest_peer);
+}
+
+std::vector<std::string> MeshRouter::determine_next_hop_locked(const std::string &src_peer,
+                                                               const std::string &dest_peer) const {
+    if (dest_peer.empty()) {
+        return get_direct_neighbors_locked();
     }
 
-    // Track visited peers to prevent loops
-    if (seen_ids_.contains(pkt.id())) {
-        std::cerr << "[Router] Detected loop for pkt " << pkt.id() << " — dropping\n";
+    // if destination is specified, find the stored next hop
+    auto it = forwarding_table_.find(dest_peer);
+    if (it == forwarding_table_.end() || it->second.cost >= INF_COST) {
+        // Only logging if we are the sender
+        if (src_peer == self_id_) {
+            std::cerr << "Router: no route to " << dest_peer << std::endl;
+        }
+        return {};
+    }
+
+    return {it->second.next_hop};
+}
+
+void MeshRouter::route_data_packet(const std::string &immediate_src, const std::string &dest_peer,
+                                   mesh::RoutedPacket &pkt) {
+    const std::string &initial_src = pkt.from_peer_id();
+    bool is_broadcast = dest_peer.empty();
+    bool is_for_me = {dest_peer == self_id_};
+
+    if (is_for_me && pkt.type() == mesh::PacketType::BINARY) {
+        if (request_tracker_.fulfill_request(pkt.id(), pkt.from_peer_id(), pkt.binary_data())) {
+            return;
+        }
+    }
+
+    if (is_broadcast || is_for_me) {
+        bool is_my_own_msg = (initial_src == self_id_);
+
+        if (on_message_cb_ && !is_my_own_msg) {
+            on_message_cb_(initial_src, pkt);
+        }
+
+        if (is_for_me) return;
+    }
+
+    if (immediate_src != self_id_ && seen_ids_.contains(pkt.id())) {
+        // Only log if it wasn't a broadcast (broadcasts loop frequently by definition)
+        if (!is_broadcast) {
+            std::cerr << "[Router] Loop detected for pkt " << pkt.id() << " — dropping\n";
+        }
         return;
     }
     seen_ids_.insert(pkt.id());
 
-    std::string next_peer_id;
-    {
-        std::lock_guard<std::mutex> lock(mu_);
-        // Find where to forward it
-        auto it = forwarding_table_.find(dest_peer);
-        if (it == forwarding_table_.end() || it->second.cost >= INF_COST) {
-            // Only logging if we are the sender
-            if (pkt.from_peer_id() == self_id_) {
-                std::cerr << "Router: no route to " << dest_peer << std::endl;
-            }
-            return;
+    std::vector<std::string> next_peer_ids = determine_next_hop(immediate_src, dest_peer);
+
+    for (const std::string &next_peer_id: next_peer_ids) {
+        if (next_peer_id == immediate_src) continue;
+
+        if (next_peer_id == self_id_) continue;
+
+        // Copying so we don't share TTL state
+        mesh::RoutedPacket forward_pkt = pkt;
+        forward_pkt.set_ttl(forward_pkt.ttl() - 1);
+
+        if (forward_pkt.ttl() <= 0) {
+            std::cerr << "[Router] TTL expired for pkt " << pkt.id() << "\n";
+            continue;
+        };
+
+
+        mesh::Envelope env;
+        env.set_type(mesh::EnvelopeType::DATA);
+        env.set_payload(forward_pkt.SerializeAsString());
+
+        if (std::shared_ptr<ITransportLayer> t = transport_.lock()) {
+            t->send_message(next_peer_id, env);
+        } else {
+            std::cerr << "[Router] Transport is dead, cannot route." << std::endl;
         }
-
-        next_peer_id = it->second.next_hop;
-    }
-
-    if (next_peer_id == self_id_) {
-        std::cerr << "[Router] Loop detected: route to "
-                << dest_peer << " points to self — dropping\n";
-        return;
-    }
-
-    // Construct the new env to forward
-    mesh::Envelope env;
-    env.set_type(mesh::EnvelopeType::DATA);
-    pkt.set_ttl(pkt.ttl() - 1);
-    if (pkt.ttl() < 1) {
-        std::cerr << "Router: dropping pkt, ttl reached" << std::endl;
-        return;
-    }
-    env.set_payload(pkt.SerializeAsString());
-
-    if (std::shared_ptr<ITransportLayer> t = transport_.lock()) {
-        std::cout << "routing packet through " << next_peer_id << std::endl;
-        std::cout << "passing env to transport with pkt id " << pkt.id() << std::endl;
-        t->send_message(next_peer_id, env);
-    } else {
-        std::cerr << "[Router] Transport is dead, cannot route." << std::endl;
     }
 }
 
-void MeshRouter::process_routing_update(const std::string &neighbor_id, const mesh::RouteTable &table) {
-    std::lock_guard<std::mutex> lock(mu_);
+void MeshRouter::process_routing_update_locked(const std::string &neighbor_id, const mesh::RouteTable &table) {
     auto &view = neighbor_views_[neighbor_id];
     view.last_heard_from = std::chrono::steady_clock::now();
 
@@ -199,10 +271,10 @@ void MeshRouter::process_routing_update(const std::string &neighbor_id, const me
         }
     }
 
-    recalculate_forwarding_table();
+    recalculate_forwarding_table_locked();
 }
 
-void MeshRouter::recalculate_forwarding_table() {
+void MeshRouter::recalculate_forwarding_table_locked() {
     bool table_changed = false;
     std::unordered_map<std::string, RouteEntry> new_table;
     auto now = std::chrono::steady_clock::now();
@@ -211,9 +283,6 @@ void MeshRouter::recalculate_forwarding_table() {
     for (const auto &[neighbor_id, view]: neighbor_views_) {
         new_table[neighbor_id] = {neighbor_id, 1, true, now};
     }
-    // if (!new_table.contains(neighbor_id) || 1 < new_table[neighbor_id].cost) {
-    //     new_table[neighbor_id] = {neighbor_id, 1, true};
-    // }
 
     for (const auto &[neighbor_id, view]: neighbor_views_) {
         for (const auto &[dest, remote_cost]: view.advertised_routes) {
@@ -268,6 +337,7 @@ void MeshRouter::recalculate_forwarding_table() {
 }
 
 void MeshRouter::run_periodic_maintenance(std::chrono::steady_clock::time_point time_point) {
+    std::unique_lock lock(mu_);
     auto now = std::chrono::steady_clock::now();
 
     bool has_expired_neighbor = false;
@@ -282,7 +352,7 @@ void MeshRouter::run_periodic_maintenance(std::chrono::steady_clock::time_point 
         }
     }
 
-    if (has_expired_neighbor) recalculate_forwarding_table();
+    if (has_expired_neighbor) recalculate_forwarding_table_locked();
 
     // Debounce for changes
     if (trigger_pending_ && now >= trigger_deadline_) {
@@ -390,12 +460,16 @@ void MeshRouter::print_routing_table() {
     while (true) {
         using namespace std::chrono_literals;
         std::this_thread::sleep_for(10s);
-        std::cout << "=== Routing Table (" << self_id_ << ") ===\n";
-        for (const auto &[dest, entry]: forwarding_table_) {
-            std::cout << "Dest: " << dest
-                    << " | NextHop: " << entry.next_hop
-                    << " | Cost: " << entry.cost << "\n";
+        {
+            std::shared_lock lock(mu_);
+
+            std::cout << "=== Routing Table (" << self_id_ << ") ===\n";
+            for (const auto &[dest, entry]: forwarding_table_) {
+                std::cout << "Dest: " << dest
+                        << " | NextHop: " << entry.next_hop
+                        << " | Cost: " << entry.cost << "\n";
+            }
+            std::cout << "================================\n";
         }
-        std::cout << "================================\n";
     }
 }

@@ -31,6 +31,7 @@ add_executable(MeshNetworking main.cpp
         src/proto_types/EnvelopeUtils.cpp
         src/proto_types/RoutedPacketUtils.cpp
         src/routing/MeshRouter.cpp
+        src/graph/GraphManager.cpp
         ${PROTO_SRCS}
         ${PROTO_HDRS}
 )
@@ -46,6 +47,8 @@ target_include_directories(MeshNetworking PRIVATE
         src/rpc
         src/proto_types
         src/routing
+        src/graph
+        src/utils
 )
 
 target_link_libraries(MeshNetworking PRIVATE
