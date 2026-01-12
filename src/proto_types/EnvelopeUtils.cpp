@@ -1,17 +1,9 @@
 #include "EnvelopeUtils.h"
 
-#include <boost/uuid/random_generator.hpp>
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_io.hpp>
-
 #include "envelope.pb.h"
+#include "message_utils.h"
 
 namespace mesh {
-    boost::uuids::uuid gen_uuid() {
-        static boost::uuids::random_generator generator;
-        return generator();
-    }
-
     namespace envelope {
         PeerIP MakePeerIP(boost::asio::ip::basic_endpoint<boost::asio::ip::tcp> endpoint) {
             PeerIP ip;
@@ -26,7 +18,7 @@ namespace mesh {
             Envelope e;
             *e.mutable_from() = from;
             *e.mutable_to() = to;
-            e.set_msg_id(gen_uuid().data, 16);
+            e.set_msg_id(generate_uuid_bytes());
             e.set_payload(payload);
             e.set_type(mesh::DATA);
             e.set_expect_response(false);
@@ -44,7 +36,7 @@ namespace mesh {
             *h.mutable_peer_record() = r;
 
             Envelope e;
-            e.set_msg_id(gen_uuid().data, 16);
+            e.set_msg_id(generate_uuid_bytes());
             *e.mutable_from() = from;
             *e.mutable_to() = to;
 
@@ -69,7 +61,7 @@ namespace mesh {
             Envelope e;
             *e.mutable_from() = from;
             *e.mutable_to() = to;
-            e.set_msg_id(gen_uuid().data, 16);
+            e.set_msg_id(generate_uuid_bytes());
 
             e.set_type(mesh::HANDSHAKE);
             e.set_payload(h.SerializeAsString());
@@ -80,7 +72,7 @@ namespace mesh {
         Envelope MakeHeartbeatRequest(const PeerIP &from,
                                       const PeerIP &to) {
             Envelope e;
-            e.set_msg_id(gen_uuid().data, 16);
+            e.set_msg_id(generate_uuid_bytes());
             *e.mutable_from() = from;
             *e.mutable_to() = to;
 
@@ -93,7 +85,7 @@ namespace mesh {
         Envelope MakeHeartbeatResponse(const PeerIP &from,
                                        const PeerIP &to) {
             Envelope e;
-            e.set_msg_id(gen_uuid().data, 16);
+            e.set_msg_id(generate_uuid_bytes());
             *e.mutable_from() = from;
             *e.mutable_to() = to;
 

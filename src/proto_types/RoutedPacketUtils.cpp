@@ -1,6 +1,7 @@
 #include <optional>
 
 #include "EnvelopeUtils.h"
+#include "message_utils.h"
 #include "packet.pb.h"
 
 namespace mesh {
@@ -22,7 +23,7 @@ namespace mesh {
             bool expect_response
         ) {
             RoutedPacket pkt;
-            pkt.set_id(gen_uuid().data, 16);
+            pkt.set_id(generate_uuid_bytes());
             pkt.set_from_peer_id(from_peer_id);
             pkt.set_to_peer_id(to_peer_id);
             pkt.set_ttl(ttl);
@@ -41,7 +42,7 @@ namespace mesh {
             bool expect_response
         ) {
             RoutedPacket pkt;
-            pkt.set_id(gen_uuid().data, 16);
+            pkt.set_id(generate_uuid_bytes());
             pkt.set_from_peer_id(from_peer_id);
             pkt.set_to_peer_id(to_peer_id);
             pkt.set_ttl(ttl);
@@ -59,7 +60,7 @@ namespace mesh {
             const std::map<std::string, uint32_t> &routing_table
         ) {
             RoutedPacket pkt;
-            pkt.set_id(gen_uuid().data, 16);
+            pkt.set_id(generate_uuid_bytes());
             pkt.set_from_peer_id(from_peer_id);
             pkt.set_to_peer_id(to_peer_id);
             pkt.set_ttl(ttl);
@@ -78,7 +79,7 @@ namespace mesh {
             const RouteTable &rt
         ) {
             RoutedPacket pkt;
-            pkt.set_id(gen_uuid().data, 16);
+            pkt.set_id(generate_uuid_bytes());
             pkt.set_from_peer_id(from_peer_id);
             pkt.set_to_peer_id(to_peer_id);
             pkt.set_ttl(ttl);
