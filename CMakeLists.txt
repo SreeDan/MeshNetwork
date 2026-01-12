@@ -4,6 +4,7 @@ project(MeshNetworking)
 set(CMAKE_CXX_STANDARD 23)
 
 find_package(Protobuf CONFIG REQUIRED)
+set(Boost_NO_SYSTEM_PATHS ON)
 find_package(Boost REQUIRED COMPONENTS filesystem system)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
@@ -25,6 +26,7 @@ add_library(mesh_core
         src/routing/MeshRouter.cpp
         src/graph/GraphManager.cpp
         src/utils/message_utils.cpp
+        src/logging/Logger.cpp
         ${PROTO_SRCS}
         ${PROTO_HDRS}
 )
@@ -49,6 +51,7 @@ target_include_directories(mesh_core PUBLIC
         ${CMAKE_SOURCE_DIR}/src/routing
         ${CMAKE_SOURCE_DIR}/src/rpc
         ${CMAKE_SOURCE_DIR}/src/utils
+        ${CMAKE_SOURCE_DIR}/src/logging
 )
 
 add_executable(MeshNetworking main.cpp)

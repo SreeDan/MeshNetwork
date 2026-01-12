@@ -1,4 +1,4 @@
-BUILD_DIR := cmake-build-debug
+BUILD_DIR := build
 BINARY := ./$(BUILD_DIR)/MeshNetworking
 
 # make sure VCPKG_ROOT is set in the PATH

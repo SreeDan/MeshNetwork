@@ -8,6 +8,7 @@
     "nlohmann-json",
     "protobuf",
     "boost-filesystem",
-    "boost-system"
+    "boost-system",
+    "boost-graph"
   ]
 }
