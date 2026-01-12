@@ -3,8 +3,8 @@
 #include <thread>
 #include <boost/asio.hpp>
 
+#include "Logger.h"
 #include "mesh_node.h"
-
 
 std::shared_ptr<boost::asio::ssl::context> make_ssl_context(
     const std::string &cert_file,
@@ -50,6 +50,11 @@ int main(int argc, char **argv) {
     int udp_port = std::stoi(argv[2]);
     std::string peer_id = argv[3];
 
+    std::filesystem::path output_dir = std::filesystem::current_path() / "out";
+    Log::init(output_dir / "node_log.txt");
+
+    Log::info("main", {}, "Welcome to MeshNetworking!");
+
     bool use_tls = false;
     std::string cert, key, ca;
     if (argc >= 8 && std::string(argv[4]) == "--tls") {
@@ -73,7 +78,7 @@ int main(int argc, char **argv) {
 
     MeshNode node(ioc, tcp_port, udp_port, peer_id, ssl_ctx);
 
-    node.set_output_directory(std::filesystem::current_path() / "out");
+    node.set_output_directory(output_dir);
 
     node.start();
 
