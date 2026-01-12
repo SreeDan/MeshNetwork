@@ -1,0 +1,13 @@
+{
+  "name": "mesh-networking",
+  "version": "0.1.0",
+  "dependencies": [
+    "fmt",
+    "spdlog",
+    "openssl",
+    "nlohmann-json",
+    "protobuf",
+    "boost-filesystem",
+    "boost-system"
+  ]
+}
