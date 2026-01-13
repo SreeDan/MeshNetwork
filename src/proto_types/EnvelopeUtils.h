@@ -38,6 +38,10 @@ namespace mesh {
             const PeerIP &from,
             const PeerIP &to
         );
+
+        Envelope MakeGenericData(
+            const std::string &payload
+        );
     }
 }
 

@@ -94,5 +94,13 @@ namespace mesh {
             e.set_expect_response(false);
             return e;
         }
+
+        Envelope MakeGenericData(const std::string &payload) {
+            Envelope e;
+            e.set_msg_id(generate_uuid_bytes());
+            *e.mutable_payload() = payload;
+            e.set_type(mesh::DATA);
+            return e;
+        }
     }
 }

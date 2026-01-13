@@ -5,6 +5,7 @@
 #include <shared_mutex>
 
 #include "AsyncRequestTracker.h"
+#include "DedeupSet.h"
 #include "IMessageSink.h"
 #include "MeshEvents.h"
 #include "RpcManager.h"
@@ -77,6 +78,8 @@ public:
     void generate_topology_graph(const std::string &destination_path);
 
 private:
+    using DedupKey = std::tuple<std::string, bool>;
+
     const std::string self_id_;
     std::weak_ptr<ITransportLayer> transport_;
 
@@ -88,9 +91,9 @@ private:
 
     ThreadSafeQueue<MeshEvent> event_queue_;
 
-    // TODO: change for something more robust
-    // Maybe LRU set based off peer ids
-    std::unordered_set<std::string> seen_ids_;
+    // TODO: change for something more robust like LRU which removes old ids
+    // Set based off {peer ids, request/response=true/false}
+    DedupSet<DedupKey, TupleHash> seen_ids_;
 
     // Routing state (protected by mu_)
     std::unordered_map<std::string, RouteEntry> forwarding_table_;

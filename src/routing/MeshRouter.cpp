@@ -1,11 +1,11 @@
 #include "MeshRouter.h"
 
-#include <ranges>
 #include <utility>
 
 #include "GraphManager.h"
 #include "packet.pb.h"
 #include "RoutedPacketUtils.h"
+#include "string_utils.h"
 
 MeshRouter::MeshRouter(boost::asio::io_context &ioc, const std::string &self_id,
                        const std::shared_ptr<ITransportLayer> &transport)
@@ -221,14 +221,16 @@ void MeshRouter::route_data_packet(const std::string &immediate_src, const std::
         if (is_for_me) return;
     }
 
-    if (immediate_src != self_id_ && seen_ids_.contains(pkt.id())) {
+    auto dedup_packet_tup = std::make_tuple(pkt.id(), pkt.expect_response());
+
+    if (immediate_src != self_id_ && seen_ids_.contains(dedup_packet_tup)) {
         // Only log if it wasn't a broadcast (broadcasts loop frequently by definition)
         if (!is_broadcast) {
             std::cerr << "[Router] Loop detected for pkt " << pkt.id() << " — dropping\n";
         }
         return;
     }
-    seen_ids_.insert(pkt.id());
+    seen_ids_.insert(dedup_packet_tup);
 
     std::vector<std::string> next_peer_ids = determine_next_hop(immediate_src, dest_peer);
 
