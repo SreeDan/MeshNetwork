@@ -1,11 +1,12 @@
 #include "MeshRouter.h"
 
-#include <ranges>
 #include <utility>
 
 #include "GraphManager.h"
+#include "Logger.h"
 #include "packet.pb.h"
 #include "RoutedPacketUtils.h"
+#include "string_utils.h"
 
 MeshRouter::MeshRouter(boost::asio::io_context &ioc, const std::string &self_id,
                        const std::shared_ptr<ITransportLayer> &transport)
@@ -92,12 +93,12 @@ void MeshRouter::processing_loop() {
         if (event_opt) {
             auto &event = *event_opt;
             if (event.type == EventType::PEER_CONNECTED) {
-                std::cout << "[Router] Peer connected " << event.peer_id << std::endl;
+                Log::info("router", {{"peer_id", event.peer_id}}, "peer connected");
                 std::unique_lock lock(mu_);
                 neighbor_views_[event.peer_id].last_heard_from = std::chrono::steady_clock::now();
                 recalculate_forwarding_table_locked();
             } else if (event.type == EventType::PEER_DISCONNECTED) {
-                std::cout << "[Router] Peer disconnected " << event.peer_id << std::endl;
+                Log::info("router", {{"peer_id", event.peer_id}}, "peer disconnected");
                 std::unique_lock lock(mu_);
                 neighbor_views_.erase(event.peer_id);
                 recalculate_forwarding_table_locked();
@@ -135,7 +136,7 @@ void MeshRouter::handle_packet(const std::string &src_id, mesh::RoutedPacket &pk
     } else if (pkt.type() == mesh::PacketType::TEXT || pkt.type() == mesh::PacketType::BINARY) {
         route_data_packet(src_id, pkt.to_peer_id(), pkt);
     } else {
-        std::cerr << "Unknown type " << pkt.type() << std::endl;
+        Log::warn("handle_packet", {{"type", pkt.type()}}, "unknown packet type");
     }
 }
 
@@ -191,7 +192,7 @@ std::vector<std::string> MeshRouter::determine_next_hop_locked(const std::string
     if (it == forwarding_table_.end() || it->second.cost >= INF_COST) {
         // Only logging if we are the sender
         if (src_peer == self_id_) {
-            std::cerr << "Router: no route to " << dest_peer << std::endl;
+            Log::warn("router", {{"peer_id", dest_peer}}, "no route to peer");
         }
         return {};
     }
@@ -221,14 +222,16 @@ void MeshRouter::route_data_packet(const std::string &immediate_src, const std::
         if (is_for_me) return;
     }
 
-    if (immediate_src != self_id_ && seen_ids_.contains(pkt.id())) {
+    auto dedup_packet_tup = std::make_tuple(pkt.id(), pkt.expect_response());
+
+    if (immediate_src != self_id_ && seen_ids_.contains(dedup_packet_tup)) {
         // Only log if it wasn't a broadcast (broadcasts loop frequently by definition)
         if (!is_broadcast) {
-            std::cerr << "[Router] Loop detected for pkt " << pkt.id() << " — dropping\n";
+            Log::warn("router", {{"packet_id", to_hex(pkt.id())}}, "dropping packet, loop detected");
         }
         return;
     }
-    seen_ids_.insert(pkt.id());
+    seen_ids_.insert(dedup_packet_tup);
 
     std::vector<std::string> next_peer_ids = determine_next_hop(immediate_src, dest_peer);
 
@@ -242,19 +245,17 @@ void MeshRouter::route_data_packet(const std::string &immediate_src, const std::
         forward_pkt.set_ttl(forward_pkt.ttl() - 1);
 
         if (forward_pkt.ttl() <= 0) {
-            std::cerr << "[Router] TTL expired for pkt " << pkt.id() << "\n";
+            Log::warn("router", {{"packet_id", to_hex(pkt.id())}}, "dropping packet, TTL expired for packet");
             continue;
         };
 
 
-        mesh::Envelope env;
-        env.set_type(mesh::EnvelopeType::DATA);
-        env.set_payload(forward_pkt.SerializeAsString());
+        mesh::Envelope env = mesh::envelope::MakeGenericData(forward_pkt.SerializeAsString());
 
         if (std::shared_ptr<ITransportLayer> t = transport_.lock()) {
             t->send_message(next_peer_id, env);
         } else {
-            std::cerr << "[Router] Transport is dead, cannot route." << std::endl;
+            Log::error("router", {}, "cannot route, transport is dead");
         }
     }
 }
@@ -325,7 +326,7 @@ void MeshRouter::recalculate_forwarding_table_locked() {
                 pair.second.dirty = true;
                 pair.second.last_updated = now;
                 table_changed = true;
-                std::cout << "Router: route lost to " << pair.first << std::endl;
+                Log::debug("router", {{"peer_id", pair.first}}, "route lost");
             }
         }
     }
@@ -344,7 +345,7 @@ void MeshRouter::run_periodic_maintenance(std::chrono::steady_clock::time_point 
     auto it = neighbor_views_.begin();
     while (it != neighbor_views_.end()) {
         if (now - it->second.last_heard_from > ROUTE_TIMEOUT) {
-            std::cout << "Router: neighbor timeout " << it->first << std::endl;
+            Log::warn("router", {{"peer_id", it->first}}, "neighbor timeout");
             it = neighbor_views_.erase(it);
             has_expired_neighbor = true;
         } else {
@@ -370,7 +371,7 @@ void MeshRouter::run_periodic_maintenance(std::chrono::steady_clock::time_point 
         if (gc_it->second.cost >= INF_COST) {
             // Keep dead route for 15s so the INF propagates to others
             if (now - gc_it->second.last_updated > std::chrono::seconds(15)) {
-                std::cout << "[Router] GC: Removing dead route to " << gc_it->first << std::endl;
+                Log::debug("router", {{"peer_id", gc_it->first}}, "removing dead route");
                 gc_it = forwarding_table_.erase(gc_it);
                 continue;
             }
@@ -463,13 +464,16 @@ void MeshRouter::print_routing_table() {
         {
             std::shared_lock lock(mu_);
 
-            std::cout << "=== Routing Table (" << self_id_ << ") ===\n";
+            json table_dump = json::array();
+
             for (const auto &[dest, entry]: forwarding_table_) {
-                std::cout << "Dest: " << dest
-                        << " | NextHop: " << entry.next_hop
-                        << " | Cost: " << entry.cost << "\n";
+                table_dump.push_back({
+                    {"destination", dest},
+                    {"next_hop", entry.next_hop},
+                    {"cost", entry.cost}
+                });
             }
-            std::cout << "================================\n";
+            Log::debug("RoutingManager", {{"routing_table", table_dump}}, "Routing table update");
         }
     }
 }

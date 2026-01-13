@@ -8,6 +8,7 @@
 #include <boost/uuid/uuid_io.hpp>
 
 #include "EnvelopeUtils.h"
+#include "Logger.h"
 
 using namespace std::chrono_literals;
 
@@ -171,7 +172,7 @@ std::future<std::string> RpcConnection::send_message(
 
     mesh::PeerIP self_peer = get_local_peer_ip();
     if (self_peer.ip() == envelope.to().ip() && self_peer.port() == envelope.to().port()) {
-        std::cout << "warning: sending message to itself" << std::endl;
+        Log::warn("rpc:send_message", {{"message_id", envelope.msg_id()}}, "sending message to itself");
     }
 
     session_->async_send_message(req_id, message_contents);
