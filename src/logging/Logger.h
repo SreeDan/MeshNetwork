@@ -1,5 +1,7 @@
 #pragma once
 
+#include <spdlog/common.h>
+
 #include "nlohmann/json.hpp"
 
 using json = nlohmann::json;
@@ -10,7 +12,9 @@ constexpr int DEFAULT_LOG_MAX_FILES = 3;
 class Log {
 public:
     static void init(
+        const std::string &node_id,
         const std::string &filename,
+        bool debug_mode,
         int max_size = DEFAULT_LOG_FILE_SIZE,
         int max_files = DEFAULT_LOG_MAX_FILES
     );
@@ -20,5 +24,6 @@ public:
     static void warn(const std::string &component, const json &context, const std::string &message);
 
     static void error(const std::string &component, const json &context, const std::string &message);
+
     static void debug(const std::string &component, const json &context, const std::string &message);
 };

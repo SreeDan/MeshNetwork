@@ -14,4 +14,4 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "--- Running ---"
-"$BINARY" "$@"
+"$BINARY" "$@" --debug

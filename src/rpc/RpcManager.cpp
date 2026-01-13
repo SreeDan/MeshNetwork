@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "EnvelopeUtils.h"
+#include "Logger.h"
 #include "handlers/HandshakeHandler.h"
 #include "handlers/HeartbeatHandler.h"
 #include "packet.pb.h"
@@ -32,8 +33,11 @@ std::expected<std::string, std::string> RpcManager::create_connection(const std:
     boost::system::error_code ec;
     auto remote_ep = sock.remote_endpoint(ec);
     if (ec) {
-        std::cerr << "remote_endpoint failed: " << ec.message() << std::endl;
-        return std::unexpected("fail");
+        Log::warn("create_connection",
+                  {{"remote_address", remote_addr}},
+                  "failed to create remote endpoint"
+        );
+        return std::unexpected("failed to create connection");
     }
     auto local_endpoint = sock.local_endpoint();
     auto rpc_connection = std::make_shared<RpcConnection>(ioc_, std::move(sock), peer_id_, local_endpoint,
@@ -72,13 +76,13 @@ void RpcManager::accept_connection(const std::string &remote_addr, boost::asio::
 
     // Spawning in a new thread because we don't want to block here
     std::thread([this, rpc_connection]() {
-        std::cout << "starting new std::thread for accepting connection" << std::endl;
         auto res = rpc_connection->start(false); // Blocking call
 
         if (res.has_value()) {
-            std::cout << "Handshake complete. Accepted peer: " << res.value().peer_id() << std::endl;
+            const std::string &peer_id = res.value().peer_id();
+            Log::info("accept_connection", {{"peer_id", peer_id}}, "handshake complete, accepted peer");
             std::lock_guard<std::mutex> guard(mu_);
-            auto remote_peer_id = res.value().peer_id();
+            auto remote_peer_id = peer_id;
             rpc_connection->set_remote_peer_id(remote_peer_id);
             connections_.insert({remote_peer_id, rpc_connection});
 
@@ -86,7 +90,7 @@ void RpcManager::accept_connection(const std::string &remote_addr, boost::asio::
                 sink->on_peer_connected(remote_peer_id);
             }
         } else {
-            std::cerr << "Handshake failed: " << res.error() << std::endl;
+            Log::warn("accept_connection", {{"err", res.error()}}, "handshake failed");
         }
     }).detach();
 }
@@ -130,7 +134,6 @@ std::expected<std::future<std::string>, SendError> RpcManager::send_message(
         conn = it->second;
     }
 
-    // std::cout << "transport: Sending env with data" << envelope.payload() << std::endl;
     if (timeout.has_value()) {
         return conn->send_message(envelope, timeout.value());
     } else {
@@ -175,18 +178,17 @@ void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
             try {
                 fut.get();
                 consecutive_failed.insert({peer, 0});
-                std::cout << "successful heartbeat with " << peer << std::endl;
+                Log::debug("heartbeat", {{"peer_id", peer}}, "successful heartbeat");
             } catch (const std::exception &e) {
-                std::cerr << e.what() << std::endl;
                 std::lock_guard<std::mutex> guard(mu_);
 
                 int current_failures = ++consecutive_failed[peer];
                 if (current_failures >= rpc::MAX_HEARTBEAT_FAILURES) {
+                    Log::warn("heartbeat", {{"peer_id", peer}}, "failed too many heartbeats, removing connection");
                     connections_.erase(peer);
                     consecutive_failed.erase(peer);
-                    std::cout << "failed heartbeat with " << peer << ", removing connection" << std::endl;
                 } else {
-                    std::cout << "failed heartbeat with " << peer << std::endl;
+                    Log::warn("heartbeat", {{"peer_id", peer}}, "failed heartbeat");
                 }
             }
         }

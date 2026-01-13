@@ -2,6 +2,7 @@
 
 #include "EnvelopeUtils.h"
 #include "IRpcMessageHandler.h"
+#include "Logger.h"
 #include "RpcConnection.h"
 
 void HandshakeHandler::handle(std::shared_ptr<RpcConnection> conn, const mesh::Envelope &env) {
@@ -10,7 +11,10 @@ void HandshakeHandler::handle(std::shared_ptr<RpcConnection> conn, const mesh::E
     // Deserialize the request
     mesh::Handshake req;
     if (!req.ParseFromString(env.payload())) {
-        std::cerr << "Failed to parse handshake request\n";
+        Log::warn("handshake_handler",
+                  {{"peer_id", conn.get()->get_remote_peer_id()}},
+                  "failed to parse handshake request"
+        );
         return;
     }
 

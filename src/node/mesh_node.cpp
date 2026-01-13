@@ -6,6 +6,7 @@
 
 #include "EnvelopeUtils.h"
 #include "GraphManager.h"
+#include "Logger.h"
 #include "ping.pb.h"
 
 MeshNode::MeshNode(
@@ -65,12 +66,10 @@ void MeshNode::stop() {
 void MeshNode::enable_topology_features() {
     on<mesh::TopologyRequest>(
         [this](const std::string &from, const mesh::TopologyRequest &req, auto reply) {
-            std::cout << "on top resp" << std::endl;
             auto neighbors = router_->get_direct_neighbors();
             mesh::TopologyResponse resp;
             for (auto &neighbor_peer_id: neighbors) {
                 resp.add_directly_connected_peers(neighbor_peer_id);
-                std::cout << "neighbor peer: " << neighbor_peer_id << std::endl;
             }
 
             std::string bytes = resp.SerializeAsString();
@@ -84,7 +83,7 @@ void MeshNode::enable_ping_features() {
         [this](const std::string &from, const mesh::PingRequest &req, auto reply) {
             mesh::PingResponse resp;
             std::string bytes = resp.SerializeAsString();
-            std::cout << "ping from " << from << std::endl;
+            Log::info("ping", {{"peer_id", from}}, "ping received");
             reply(bytes);
         }
     );
@@ -101,12 +100,13 @@ void MeshNode::do_accept() {
             if (!ec2) {
                 auto remote_addr = remote_ep.address().to_string();
                 auto remote_port = remote_ep.port();
-                std::cout << "Incoming connection from " << remote_addr << ":" <<
-                        remote_port << std::endl;
+                Log::info("mesh_node.acceptor",
+                          {{"from", remote_addr}, {"port", remote_port}},
+                          "incoming connection");
                 rpc_connections->accept_connection(remote_addr, std::move(sock));
             }
         } else {
-            std::cerr << "Accept failed: " << ec.message() << std::endl;
+            Log::error("acceptor", {{"err", ec.message()}}, "accept failed");
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
@@ -125,12 +125,18 @@ void MeshNode::connect_to(const std::string &host, int port) {
             remote_addr, std::move(sock));
 
         if (peer_response.has_value()) {
-            std::cout << "connected to remote peer_id \"" << peer_response.value() << "\"" << std::endl;
+            Log::info("mesh_node.connect",
+                      {{"peer_id", peer_response.value()}},
+                      "connected to remote peer");
         } else {
-            std::cerr << "connect_to failed to connect to remote" << peer_response.error() << std::endl;
+            Log::error("mesh_node.connect",
+                       {{"err", peer_response.error()}},
+                       "failed to connect to remote peer");
         }
     } catch (std::exception &e) {
-        std::cerr << "connect_to failed: " << e.what() << std::endl;
+        Log::error("mesh_node.connect",
+                   {"err", e.what()},
+                   "failed to connect to remote");
     }
 }
 
@@ -212,27 +218,29 @@ template<typename T>
 void MeshNode::on(std::function<void(const std::string &from, const T &msg,
                                      std::function<void(std::string &)> reply)> handler) {
     std::string subtype = T::descriptor()->full_name();
-    std::cout << "registering subtype " << subtype << std::endl;
+    Log::debug("mesh_node.on", {"subtype", subtype}, "registering subtype");
 
     handlers_[subtype] = [handler](const std::string &from, const std::string &raw_bytes, auto reply_cb) {
         if (T msg; msg.ParseFromString(raw_bytes)) {
             handler(from, msg, std::move(reply_cb));
         } else {
-            std::cerr << "Failed to parse " << T::descriptor()->full_name() << std::endl;
+            Log::error("mesh_node.on", {"subtype", T::descriptor()->full_name()},
+                       "failed to parse protobuf subtype message");
         }
     };
 }
 
 void MeshNode::ping(const std::string &peer) {
     mesh::PingRequest req;
+
     auto future = send_request<mesh::PingResponse>(peer, req);
 
     std::pair<std::string, mesh::PingResponse> resp;
     try {
         resp = future.get();
-        std::cout << "pong from " << resp.first << std::endl;
+        Log::info("ping", {{"peer_id", resp.first}}, "pong received");
     } catch (const std::exception &e) {
-        std::cerr << "Ping request failed: " << e.what() << std::endl;
+        Log::error("ping", {{"err", e.what()}}, "ping request failed");
     }
 }
 
@@ -258,12 +266,16 @@ void MeshNode::handle_received_message(const std::string &from, const mesh::Rout
             // second is the handler
             it->second(from, pkt.binary_data(), reply_cb);
         } else {
-            std::cerr << "[MeshNode] No handler for subtype: " << pkt.subtype() << std::endl;
+            Log::warn("received_message",
+                      {{"subtype", pkt.subtype()}},
+                      "no handler for subtype");
         }
     }
     // Case 2: legacy/debug text messages
     else if (pkt.type() == mesh::PacketType::TEXT) {
-        std::cout << "[MeshNode] Text from " << from << ": " << pkt.text() << std::endl;
+        Log::info("received_message",
+                  {{"message", pkt.text()}, {"from", from}},
+                  "text received");
     }
 }
 
@@ -280,7 +292,7 @@ void MeshNode::generate_topology_graph(const std::string &filename) {
     try {
         broadcast_responses = future.get();
     } catch (const std::exception &e) {
-        std::cerr << "Topology request failed: " << e.what() << std::endl;
+        Log::error("topology", {{"err", e.what()}}, "topology request failed");
         return;
     }
     std::filesystem::path dir{output_directory_};

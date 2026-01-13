@@ -41,6 +41,16 @@ std::shared_ptr<boost::asio::ssl::context> make_ssl_context(
     }
 }
 
+// TODO: Make arguments come from a yml file instead
+bool has_arg(int argc, char *argv[], const std::string &target) {
+    for (int i = 0; i < argc; ++i) {
+        if (argv[i] == target) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int main(int argc, char **argv) {
     if (argc < 4) {
         std::cerr << "Usage: meshnode <tcp_port> <udp_discovery_port> <peer_id> [--tls cert key ca]\n";
@@ -49,9 +59,13 @@ int main(int argc, char **argv) {
     int tcp_port = std::stoi(argv[1]);
     int udp_port = std::stoi(argv[2]);
     std::string peer_id = argv[3];
-
     std::filesystem::path output_dir = std::filesystem::current_path() / "out";
-    Log::init(output_dir / "node_log.txt");
+    bool is_debug_mode = false;
+    if (has_arg(argc, argv, "--debug")) {
+        is_debug_mode = true;
+    }
+
+    Log::init(peer_id, output_dir / "node_log.txt", is_debug_mode);
 
     Log::info("main", {}, "Welcome to MeshNetworking!");
 

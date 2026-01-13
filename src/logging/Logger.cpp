@@ -6,13 +6,23 @@
 #include "spdlog/sinks/rotating_file_sink.h"
 
 
-void Log::init(const std::string &filename, int max_size, int max_files) {
+// std::string safe_dump(const json &context) {
+//     return context.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+// }
+
+void Log::init(const std::string &node_id, const std::string &filename, bool debug_mode, int max_size, int max_files) {
     try {
         auto logger = spdlog::rotating_logger_mt("app_logger", filename, max_size, max_files);
-        logger->set_pattern("%Y-%m-%d %H:%M:%S [%l] %v");
+        logger->set_pattern("%Y-%m-%d %H:%M:%S [" + node_id + "] [%l] %v");
+
+        if (debug_mode) {
+            logger->set_level(spdlog::level::debug);
+        } else {
+            logger->set_level(spdlog::level::info);
+        }
 
         spdlog::set_default_logger(logger);
-        spdlog::flush_on(spdlog::level::info);
+        spdlog::flush_every(std::chrono::milliseconds(100));
     } catch (const spdlog::spdlog_ex &ex) {
         std::cerr << "log initialization failed" << ex.what() << std::endl;
     }
