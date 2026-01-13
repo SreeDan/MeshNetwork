@@ -107,9 +107,13 @@ private:
 
     void processing_loop(); // Main event loop
 
-    void handle_packet(const std::string &src_id, mesh::RoutedPacket &pkt);
+    void handle_packet(const std::string &src_id, const std::string &pkt_id, mesh::RoutedPacket &pkt);
 
-    void route_data_packet(const std::string &src_peer, const std::string &dest_peer, mesh::RoutedPacket &pkt);
+    void route_data_packet(const std::string &src_peer,
+                           const std::string &dest_peer,
+                           const std::string &pkt_id,
+                           mesh::RoutedPacket &pkt
+    );
 
     void run_periodic_maintenance(std::chrono::steady_clock::time_point time_point);
 

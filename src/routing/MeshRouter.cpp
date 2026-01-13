@@ -103,7 +103,7 @@ void MeshRouter::processing_loop() {
                 neighbor_views_.erase(event.peer_id);
                 recalculate_forwarding_table_locked();
             } else if (event.type == EventType::PACKET_RECEIVED) {
-                handle_packet(event.peer_id, event.packet);
+                handle_packet(event.peer_id, to_hex(event.packet.id()), event.packet);
             }
         }
 
@@ -116,9 +116,7 @@ void MeshRouter::processing_loop() {
     }
 }
 
-void MeshRouter::handle_packet(const std::string &src_id, mesh::RoutedPacket &pkt) {
-    // Do dedup check.
-    // If seenmessages.contains(env.msg.id())
+void MeshRouter::handle_packet(const std::string &src_id, const std::string &pkt_id, mesh::RoutedPacket &pkt) {
     if (src_id == self_id_ || pkt.from_peer_id() == self_id_) {
         return;
     }
@@ -134,14 +132,14 @@ void MeshRouter::handle_packet(const std::string &src_id, mesh::RoutedPacket &pk
         std::unique_lock lock(mu_);
         process_routing_update_locked(src_id, pkt.route_table());
     } else if (pkt.type() == mesh::PacketType::TEXT || pkt.type() == mesh::PacketType::BINARY) {
-        route_data_packet(src_id, pkt.to_peer_id(), pkt);
+        route_data_packet(src_id, pkt.to_peer_id(), to_hex(pkt.id()), pkt);
     } else {
         Log::warn("handle_packet", {{"type", pkt.type()}}, "unknown packet type");
     }
 }
 
 void MeshRouter::send_packet(mesh::RoutedPacket &pkt) {
-    route_data_packet(self_id_, pkt.to_peer_id(), pkt);
+    route_data_packet(self_id_, pkt.to_peer_id(), to_hex(pkt.id()), pkt);
 }
 
 void MeshRouter::send_text(const std::string &dest_id, const std::string &text) {
@@ -152,17 +150,17 @@ void MeshRouter::send_text(const std::string &dest_id, const std::string &text) 
         text,
         false
     );
-    route_data_packet(self_id_, dest_id, pkt);
+    route_data_packet(self_id_, dest_id, to_hex(pkt.id()), pkt);
 }
 
 std::future<std::string> MeshRouter::send_request(mesh::RoutedPacket &pkt, std::chrono::milliseconds timeout) {
-    std::string req_id = pkt.id();
+    std::string req_id = to_hex(pkt.id());
     pkt.set_expect_response(true);
 
     // TODO: make timeout a constant
     auto future = request_tracker_.track_request(req_id, std::chrono::seconds(5));
 
-    route_data_packet(self_id_, pkt.to_peer_id(), pkt);
+    route_data_packet(self_id_, pkt.to_peer_id(), req_id, pkt);
     return future;
 }
 
@@ -171,9 +169,9 @@ void MeshRouter::send_broadcast_request(mesh::RoutedPacket &pkt,
                                         std::function<void(const std::string &, std::string)> on_response,
                                         const std::function<void()> &on_complete) {
     pkt.set_expect_response(true);
-    request_tracker_.track_broadcast(pkt.id(), duration, std::move(on_response), on_complete);
-
-    route_data_packet(self_id_, "", pkt);
+    const std::string &pkt_id = to_hex(pkt.id());
+    request_tracker_.track_broadcast(pkt_id, duration, std::move(on_response), on_complete);
+    route_data_packet(self_id_, "", pkt_id, pkt);
 }
 
 std::vector<std::string> MeshRouter::determine_next_hop(const std::string &src_peer, const std::string &dest_peer) {
@@ -201,13 +199,13 @@ std::vector<std::string> MeshRouter::determine_next_hop_locked(const std::string
 }
 
 void MeshRouter::route_data_packet(const std::string &immediate_src, const std::string &dest_peer,
-                                   mesh::RoutedPacket &pkt) {
+                                   const std::string &pkt_id, mesh::RoutedPacket &pkt) {
     const std::string &initial_src = pkt.from_peer_id();
     bool is_broadcast = dest_peer.empty();
     bool is_for_me = {dest_peer == self_id_};
 
     if (is_for_me && pkt.type() == mesh::PacketType::BINARY) {
-        if (request_tracker_.fulfill_request(pkt.id(), pkt.from_peer_id(), pkt.binary_data())) {
+        if (request_tracker_.fulfill_request(pkt_id, pkt.from_peer_id(), pkt.binary_data())) {
             return;
         }
     }
@@ -222,12 +220,12 @@ void MeshRouter::route_data_packet(const std::string &immediate_src, const std::
         if (is_for_me) return;
     }
 
-    auto dedup_packet_tup = std::make_tuple(pkt.id(), pkt.expect_response());
+    auto dedup_packet_tup = std::make_tuple(pkt_id, pkt.expect_response());
 
     if (immediate_src != self_id_ && seen_ids_.contains(dedup_packet_tup)) {
         // Only log if it wasn't a broadcast (broadcasts loop frequently by definition)
         if (!is_broadcast) {
-            Log::warn("router", {{"packet_id", to_hex(pkt.id())}}, "dropping packet, loop detected");
+            Log::warn("router", {{"packet_id", pkt_id}}, "dropping packet, loop detected");
         }
         return;
     }
@@ -245,7 +243,7 @@ void MeshRouter::route_data_packet(const std::string &immediate_src, const std::
         forward_pkt.set_ttl(forward_pkt.ttl() - 1);
 
         if (forward_pkt.ttl() <= 0) {
-            Log::warn("router", {{"packet_id", to_hex(pkt.id())}}, "dropping packet, TTL expired for packet");
+            Log::warn("router", {{"packet_id", pkt_id}}, "dropping packet, TTL expired for packet");
             continue;
         };
 
