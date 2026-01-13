@@ -20,8 +20,6 @@ public:
 
     void stop();
 
-    void send_message(const std::string &peer_id, const std::string &text);
-
     void connect_to(const std::string &host, int port);
 
     void handle_received_message(const std::string &from, const mesh::RoutedPacket &pkt);
@@ -72,6 +70,8 @@ public:
                                std::function<void(std::string &)> reply)> handler);
 
     void ping(const std::string &peer);
+
+    std::vector<std::string> get_nodes_in_network();
 
 private:
     using TypeErasedHandler = std::function<void(const std::string &from,

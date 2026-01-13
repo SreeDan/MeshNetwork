@@ -140,7 +140,7 @@ void MeshNode::connect_to(const std::string &host, int port) {
     }
 }
 
-void MeshNode::send_message(const std::string &remote_id, const std::string &text) {
+void MeshNode::send_text(const std::string &remote_id, const std::string &text) {
     router_->send_text(remote_id, text);
 }
 
@@ -242,6 +242,10 @@ void MeshNode::ping(const std::string &peer) {
     } catch (const std::exception &e) {
         Log::error("ping", {{"err", e.what()}}, "ping request failed");
     }
+}
+
+std::vector<std::string> MeshNode::get_nodes_in_network() {
+    return router_->get_peers_in_network();
 }
 
 void MeshNode::handle_received_message(const std::string &from, const mesh::RoutedPacket &pkt) {

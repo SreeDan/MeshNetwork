@@ -74,6 +74,8 @@ public:
 
     std::vector<std::string> determine_next_hop(const std::string &src_peer, const std::string &dest_peer);
 
+    std::vector<std::string> get_peers_in_network();
+
     // Debug
     void generate_topology_graph(const std::string &destination_path);
 
@@ -123,6 +125,8 @@ private:
 
     // These methods never lock
     std::vector<std::string> get_direct_neighbors_locked() const;
+
+    std::vector<std::string> get_peers_in_network_locked();
 
     std::vector<std::string> determine_next_hop_locked(const std::string &src_peer, const std::string &dest_peer) const;
 

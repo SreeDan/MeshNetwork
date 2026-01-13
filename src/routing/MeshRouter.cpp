@@ -74,6 +74,22 @@ std::vector<std::string> MeshRouter::get_direct_neighbors_locked() const {
     return neighbors;
 }
 
+std::vector<std::string> MeshRouter::get_peers_in_network() {
+    std::shared_lock lock(mu_);
+    return get_peers_in_network_locked();
+}
+
+std::vector<std::string> MeshRouter::get_peers_in_network_locked() {
+    std::vector<std::string> peers;
+    peers.reserve(forwarding_table_.size());
+    for (const auto &peer: forwarding_table_ | std::views::keys) {
+        peers.push_back(peer);
+    }
+
+    return peers;
+}
+
+
 void MeshRouter::processing_loop() {
     const auto MAINTENANCE_TICK_RATE = std::chrono::milliseconds(100);
     auto next_maintenance_time = std::chrono::steady_clock::now() + MAINTENANCE_TICK_RATE;

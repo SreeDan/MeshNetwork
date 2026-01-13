@@ -116,7 +116,7 @@ int main(int argc, char **argv) {
             if (pos != std::string::npos) {
                 std::string target = line.substr(3, pos - 3);
                 std::string msg = line.substr(pos + 1);
-                node.send_message(target, msg);
+                node.send_text(target, msg);
             }
         } else if (line.rfind("broadcast ", 0) == 0) {
             // node.broadcast_text(line.substr(10));
@@ -138,6 +138,12 @@ int main(int argc, char **argv) {
             std::string peer;
             iss >> peer;
             node.ping(peer);
+        } else if (line == "get_nodes") {
+            std::vector<std::string> nodes = node.get_nodes_in_network();
+            std::cout << nodes.size() << " node(s)" << std::endl;
+            for (size_t i = 0; i < nodes.size(); ++i) {
+                std::cout << nodes[i] << std::endl;
+            }
         } else if (line == "quit" || line == "exit") break;
         else std::cout << "Commands: broadcast <text>, dm <peer> <text>, exit\n";
     }
