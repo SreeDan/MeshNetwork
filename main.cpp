@@ -4,6 +4,7 @@
 #include <boost/asio.hpp>
 
 #include "Logger.h"
+#include "yaml-cpp/yaml.h"
 #include "mesh_node.h"
 
 std::shared_ptr<boost::asio::ssl::context> make_ssl_context(
@@ -33,7 +34,7 @@ std::shared_ptr<boost::asio::ssl::context> make_ssl_context(
             ssl_ctx->set_verify_mode(boost::asio::ssl::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
         }
 
-        std::cout << "TLS Context initialized successfully." << std::endl;
+        Log::debug("tls", {}, "TLS Context initialized successfully");
 
         return ssl_ctx;
     } catch (const std::exception &e) {
@@ -52,17 +53,26 @@ bool has_arg(int argc, char *argv[], const std::string &target) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 4) {
-        std::cerr << "Usage: meshnode <tcp_port> <udp_discovery_port> <peer_id> [--tls cert key ca]\n";
+    if (argc < 2) {
+        std::cerr << "Usage: meshnode config_path.yml\n";
         return 1;
     }
-    int tcp_port = std::stoi(argv[1]);
-    int udp_port = std::stoi(argv[2]);
-    std::string peer_id = argv[3];
-    std::filesystem::path output_dir = std::filesystem::current_path() / "out";
+
+    YAML::Node config = YAML::LoadFile(argv[1]);
+    int tcp_port = config["tcp-port"].as<int>();
+    int udp_port = config["udp-port"].as<int>();
+    std::string peer_id = config["peer-id"].as<std::string>();
+
+    std::filesystem::path output_dir;
+    if (config["output-dir"]) {
+        output_dir = config["output-dir"].as<std::string>();
+    } else {
+        output_dir = std::filesystem::current_path() / "out";
+    }
+
     bool is_debug_mode = false;
-    if (has_arg(argc, argv, "--debug")) {
-        is_debug_mode = true;
+    if (config["debug"]) {
+        is_debug_mode = config["debug"].as<bool>();
     }
 
     Log::init(peer_id, output_dir / "node_log.txt", is_debug_mode);
@@ -71,11 +81,11 @@ int main(int argc, char **argv) {
 
     bool use_tls = false;
     std::string cert, key, ca;
-    if (argc >= 8 && std::string(argv[4]) == "--tls") {
+    if (config["ssl"] && config["ssl"]["cert-path"] && config["ssl"]["key-path"] && config["ssl"]["ca-path"]) {
         use_tls = true;
-        cert = argv[5];
-        key = argv[6];
-        ca = argv[7];
+        cert = config["ssl"]["cert-path"].as<std::string>();
+        key = config["ssl"]["key-path"].as<std::string>();
+        ca = config["ssl"]["ca-path"].as<std::string>();
     }
 
     boost::asio::io_context ioc;

@@ -9,6 +9,7 @@ find_package(Boost REQUIRED COMPONENTS filesystem system)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(yaml-cpp CONFIG REQUIRED)
 
 file(GLOB PROTO_FILES "${CMAKE_SOURCE_DIR}/proto/*.proto")
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
@@ -40,6 +41,7 @@ target_link_libraries(mesh_core PUBLIC
         OpenSSL::Crypto
         nlohmann_json::nlohmann_json
         spdlog::spdlog
+        yaml-cpp::yaml-cpp
 )
 
 target_include_directories(mesh_core PUBLIC

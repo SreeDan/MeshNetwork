@@ -9,6 +9,7 @@
     "protobuf",
     "boost-filesystem",
     "boost-system",
-    "boost-graph"
+    "boost-graph",
+    "yaml-cpp"
   ]
 }
