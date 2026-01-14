@@ -24,8 +24,7 @@ RpcConnection::~RpcConnection() {
     std::lock_guard<std::mutex> guard(mu_);
     for (auto &[req_id, pending_req]: pending_requests_) {
         if (pending_req.timer) {
-            boost::system::error_code ec;
-            pending_req.timer->cancel(ec);
+            pending_req.timer->cancel();
         }
 
         try {
@@ -232,7 +231,7 @@ void RpcConnection::respond_to_message(const boost::uuids::uuid &msg_id, const m
 void RpcConnection::store_response(const boost::uuids::uuid &msg_id, const std::string &response) {
     std::lock_guard<std::mutex> guard(mu_);
 
-    std::string binary_uuid(reinterpret_cast<const char *>(msg_id.data), 16);
+    std::string binary_uuid(reinterpret_cast<const char *>(msg_id.data()), 16);
     if (pending_requests_.contains(binary_uuid)) {
         auto it = pending_requests_.find(binary_uuid);
         try {

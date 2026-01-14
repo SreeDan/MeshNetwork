@@ -1,11 +1,11 @@
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.25)
 project(MeshNetworking)
 
 set(CMAKE_CXX_STANDARD 23)
 
 find_package(Protobuf CONFIG REQUIRED)
-set(Boost_NO_SYSTEM_PATHS ON)
-find_package(Boost REQUIRED COMPONENTS filesystem system)
+set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ON)
+find_package(Boost CONFIG REQUIRED COMPONENTS filesystem system)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)

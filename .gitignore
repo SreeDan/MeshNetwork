@@ -3,3 +3,5 @@ build/*
 certs/*
 out/*
 config/*
+docker-compose.yml
+docker-out/*

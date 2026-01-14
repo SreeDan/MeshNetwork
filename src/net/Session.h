@@ -1,6 +1,7 @@
 #pragma once
 #include <deque>
 #include <memory>
+#include <optional>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/ip/address.hpp>

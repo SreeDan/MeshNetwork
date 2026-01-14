@@ -70,6 +70,17 @@ int main(int argc, char **argv) {
         output_dir = std::filesystem::current_path() / "out";
     }
 
+    try {
+        if (std::filesystem::create_directories(output_dir)) {
+            std::cout << "Successfully created directory path: " << output_dir << std::endl;
+        } else {
+            std::cout << "Directory path already exists or a non-error condition occurred." << std::endl;
+        }
+    } catch (const std::filesystem::filesystem_error &e) {
+        std::cerr << "Error creating directory path: " << e.what() << std::endl;
+    }
+
+
     bool is_debug_mode = false;
     if (config["debug"]) {
         is_debug_mode = config["debug"].as<bool>();

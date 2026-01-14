@@ -7,6 +7,8 @@
     "openssl",
     "nlohmann-json",
     "protobuf",
+    "boost-asio",
+    "boost-uuid",
     "boost-filesystem",
     "boost-system",
     "boost-graph",

@@ -52,7 +52,7 @@ public:
 
 std::string make_dummy_uuid_str() {
     boost::uuids::uuid u = boost::uuids::random_generator()();
-    return std::string(reinterpret_cast<const char *>(u.data), u.size());
+    return std::string(reinterpret_cast<const char *>(u.data()), u.size());
 }
 
 
