@@ -1,15 +1,23 @@
 cmake_minimum_required(VERSION 3.25)
+
+if (DEFINED CMAKE_TOOLCHAIN_FILE)
+    set(VCPKG_TARGET_TRIPLET "x64-linux-cpp23" CACHE STRING "" FORCE)
+    set(VCPKG_OVERLAY_TRIPLETS "${CMAKE_CURRENT_SOURCE_DIR}/triplets" CACHE STRING "" FORCE)
+endif ()
+
 project(MeshNetworking)
 
 set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Protobuf CONFIG REQUIRED)
-set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ON)
-find_package(Boost CONFIG REQUIRED COMPONENTS filesystem system)
-find_package(OpenSSL CONFIG REQUIRED)
+set(CMAKE_FIND_PACKAGE_PREFER_CONFIG TRUE)
+find_package(Boost CONFIG REQUIRED COMPONENTS filesystem system graph headers)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
+
+find_package(OpenSSL MODULE REQUIRED)
 
 file(GLOB PROTO_FILES "${CMAKE_SOURCE_DIR}/proto/*.proto")
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
@@ -36,6 +44,8 @@ add_library(mesh_core
 target_link_libraries(mesh_core PUBLIC
         Boost::filesystem
         Boost::system
+        Boost::graph
+        Boost::headers
         protobuf::libprotobuf
         OpenSSL::SSL
         OpenSSL::Crypto
