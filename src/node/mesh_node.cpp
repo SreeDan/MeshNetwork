@@ -248,6 +248,10 @@ std::vector<std::string> MeshNode::get_nodes_in_network() {
     return router_->get_peers_in_network();
 }
 
+void MeshNode::set_block_all_messages(bool block) {
+    router_->set_ignore_messages(block);
+}
+
 void MeshNode::handle_received_message(const std::string &from, const mesh::RoutedPacket &pkt) {
     if (pkt.type() == mesh::PacketType::BINARY) {
         auto it = handlers_.find(pkt.subtype());

@@ -76,6 +76,8 @@ public:
 
     std::vector<std::string> get_peers_in_network();
 
+    void set_ignore_messages(bool ignore);
+
     // Debug
     void generate_topology_graph(const std::string &destination_path);
 
@@ -90,6 +92,8 @@ private:
     std::thread routing_thread_;
     mutable std::shared_mutex mu_;
     std::atomic_bool running_{false};
+
+    bool ignore_messages_{false};
 
     ThreadSafeQueue<MeshEvent> event_queue_;
 

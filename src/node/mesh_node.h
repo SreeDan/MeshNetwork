@@ -73,6 +73,8 @@ public:
 
     std::vector<std::string> get_nodes_in_network();
 
+    void set_block_all_messages(bool block);
+
 private:
     using TypeErasedHandler = std::function<void(const std::string &from,
                                                  const std::string &raw_bytes,

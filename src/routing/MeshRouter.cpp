@@ -89,6 +89,10 @@ std::vector<std::string> MeshRouter::get_peers_in_network_locked() {
     return peers;
 }
 
+void MeshRouter::set_ignore_messages(bool ignore) {
+    ignore_messages_ = ignore;
+}
+
 
 void MeshRouter::processing_loop() {
     const auto MAINTENANCE_TICK_RATE = std::chrono::milliseconds(100);
@@ -218,7 +222,7 @@ void MeshRouter::route_data_packet(const std::string &immediate_src, const std::
                                    const std::string &pkt_id, mesh::RoutedPacket &pkt) {
     const std::string &initial_src = pkt.from_peer_id();
     bool is_broadcast = dest_peer.empty();
-    bool is_for_me = {dest_peer == self_id_};
+    bool is_for_me = {dest_peer == self_id_ && !ignore_messages_};
 
     if (is_for_me && pkt.type() == mesh::PacketType::BINARY) {
         if (request_tracker_.fulfill_request(pkt_id, pkt.from_peer_id(), pkt.binary_data())) {

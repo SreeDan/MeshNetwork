@@ -42,16 +42,6 @@ std::shared_ptr<boost::asio::ssl::context> make_ssl_context(
     }
 }
 
-// TODO: Make arguments come from a yml file instead
-bool has_arg(int argc, char *argv[], const std::string &target) {
-    for (int i = 0; i < argc; ++i) {
-        if (argv[i] == target) {
-            return true;
-        }
-    }
-    return false;
-}
-
 int main(int argc, char **argv) {
     if (argc < 2) {
         std::cerr << "Usage: meshnode config_path.yml\n";
@@ -118,6 +108,7 @@ int main(int argc, char **argv) {
     node.start();
 
     std::thread t([&ioc]() { ioc.run(); });
+    // TODO: Add automatic connections to config yaml
 
     std::string line;
     while (std::getline(std::cin, line)) {
@@ -165,6 +156,10 @@ int main(int argc, char **argv) {
             for (size_t i = 0; i < nodes.size(); ++i) {
                 std::cout << nodes[i] << std::endl;
             }
+        } else if (line == "block") {
+            node.set_block_all_messages(true);
+        } else if (line == "unblock") {
+            node.set_block_all_messages(false);
         } else if (line == "quit" || line == "exit") break;
         else std::cout << "Commands: broadcast <text>, dm <peer> <text>, exit\n";
     }
