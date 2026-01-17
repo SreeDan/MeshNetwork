@@ -1,7 +1,7 @@
 #include <optional>
 
 #include "EnvelopeUtils.h"
-#include "message_utils.h"
+#include "MessageUtils.h"
 #include "packet.pb.h"
 
 namespace mesh {

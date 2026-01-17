@@ -75,6 +75,10 @@ public:
 
     void set_block_all_messages(bool block);
 
+    void add_auto_connection(const std::string &ip_address, int port);
+
+    void remove_auto_connection(const std::string &ip_address, int port);
+
 private:
     using TypeErasedHandler = std::function<void(const std::string &from,
                                                  const std::string &raw_bytes,

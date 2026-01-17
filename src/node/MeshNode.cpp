@@ -1,4 +1,4 @@
-#include "mesh_node.h"
+#include "MeshNode.h"
 
 #include <filesystem>
 #include <iostream>
@@ -314,4 +314,15 @@ void MeshNode::generate_topology_graph(const std::string &filename) {
     }
 
     graph.save_graph(dest);
+}
+
+
+void MeshNode::add_auto_connection(const std::string &ip_address, int port) {
+    auto peer_ip = mesh::envelope::MakePeerIP(ip_address, port);
+    rpc_connections->add_auto_connection(peer_ip);
+}
+
+void MeshNode::remove_auto_connection(const std::string &ip_address, int port) {
+    auto peer_ip = mesh::envelope::MakePeerIP(ip_address, port);
+    rpc_connections->remove_auto_connection(peer_ip);
 }

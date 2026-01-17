@@ -23,7 +23,7 @@ file(GLOB PROTO_FILES "${CMAKE_SOURCE_DIR}/proto/*.proto")
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
 
 add_library(mesh_core
-        src/node/mesh_node.cpp
+        src/node/MeshNode.cpp
         src/net/Session.cpp
         src/net/Stream.cpp
         src/rpc/RpcConnection.cpp
@@ -34,8 +34,8 @@ add_library(mesh_core
         src/proto_types/RoutedPacketUtils.cpp
         src/routing/MeshRouter.cpp
         src/graph/GraphManager.cpp
-        src/utils/message_utils.cpp
-        src/utils/string_utils.cpp
+        src/utils/MessageUtils.cpp
+        src/utils/StringUtils.cpp
         src/logging/Logger.cpp
         ${PROTO_SRCS}
         ${PROTO_HDRS}

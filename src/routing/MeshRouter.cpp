@@ -6,7 +6,7 @@
 #include "Logger.h"
 #include "packet.pb.h"
 #include "RoutedPacketUtils.h"
-#include "string_utils.h"
+#include "StringUtils.h"
 
 MeshRouter::MeshRouter(boost::asio::io_context &ioc, const std::string &self_id,
                        const std::shared_ptr<ITransportLayer> &transport)

@@ -3,7 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "IStream.h"
-#include "message_utils.h"
+#include "MessageUtils.h"
 #include "Session.h"
 
 class MockStream : public StreamLayer {

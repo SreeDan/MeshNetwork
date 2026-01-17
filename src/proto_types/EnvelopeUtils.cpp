@@ -1,7 +1,7 @@
 #include "EnvelopeUtils.h"
 
 #include "envelope.pb.h"
-#include "message_utils.h"
+#include "MessageUtils.h"
 
 namespace mesh {
     namespace envelope {
@@ -9,6 +9,14 @@ namespace mesh {
             PeerIP ip;
             ip.set_ip(endpoint.address().to_string());
             ip.set_port(endpoint.port());
+            return ip;
+        }
+
+
+        PeerIP MakePeerIP(const std::string &addr, int port) {
+            PeerIP ip;
+            ip.set_ip(addr);
+            ip.set_port(port);
             return ip;
         }
 

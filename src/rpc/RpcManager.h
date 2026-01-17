@@ -26,7 +26,7 @@ public:
     void accept_connection(const std::string &remote_addr,
                            boost::asio::ip::tcp::socket sock);
 
-    bool remove_connection(std::string peer_id);
+    bool remove_connection(const std::string &peer_id);
 
     std::optional<std::shared_ptr<RpcConnection> > get_connection(const std::string &node_id);
 
@@ -36,17 +36,33 @@ public:
 
     void send_heartbeats(std::chrono::milliseconds timeout);
 
+    void add_auto_connection(const mesh::PeerIP &record);
+
+    void remove_auto_connection(const mesh::PeerIP &record);
+
 private:
     boost::asio::io_context &ioc_;
     const std::string &peer_id_;
     std::weak_ptr<IMessageSink> sink_;
     std::shared_ptr<boost::asio::ssl::context> ssl_ctx_;
+    boost::asio::steady_timer maintenance_timer_{ioc_};
+
     std::mutex mu_;
-    std::unordered_map<std::string, std::shared_ptr<RpcConnection> > connections_;
+    std::unordered_map<std::string, std::shared_ptr<RpcConnection> > connections_by_peer_;
+    std::unordered_map<std::string, std::shared_ptr<RpcConnection> > connections_by_ip_;
+
+    std::vector<mesh::PeerIP> auto_connections_;
+
     std::thread heartbeat_thread_;
     std::unordered_map<mesh::EnvelopeType, std::unique_ptr<IRpcMessageHandler> > handlers_;
 
     void register_handlers();
 
     void dispatch_message(std::shared_ptr<RpcConnection> conn, const mesh::Envelope &envelope);
+
+    void add_connection_internal(const std::string &peer_id, std::shared_ptr<RpcConnection> conn);
+
+    void run_maintenance_cycle();
+
+    void check_for_auto_connections_locked();
 };

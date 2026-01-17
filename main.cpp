@@ -5,7 +5,7 @@
 
 #include "Logger.h"
 #include "yaml-cpp/yaml.h"
-#include "mesh_node.h"
+#include "MeshNode.h"
 
 std::shared_ptr<boost::asio::ssl::context> make_ssl_context(
     const std::string &cert_file,
@@ -106,6 +106,22 @@ int main(int argc, char **argv) {
     node.set_output_directory(output_dir);
 
     node.start();
+
+    if (config["auto_connect"]) {
+        const YAML::Node &auto_connect = config["auto_connect"];
+        for (const auto &elem: auto_connect) {
+            if (!elem["ip"] || !elem["port"]) {
+                Log::warn("yaml_parse", {}, "malformed auto_conect config, should have an ip and port present");
+                continue;
+            }
+
+            std::string ip = elem["ip"].as<std::string>();
+            int port = elem["port"].as<int>();
+
+            Log::debug("yaml_parser", {{"ip", ip}, {"port", port}}, "detected auto connect configuration");
+            node.add_auto_connection(ip, port);
+        }
+    }
 
     std::thread t([&ioc]() { ioc.run(); });
     // TODO: Add automatic connections to config yaml
