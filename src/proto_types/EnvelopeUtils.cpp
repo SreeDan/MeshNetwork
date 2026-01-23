@@ -108,6 +108,7 @@ namespace mesh {
             e.set_msg_id(generate_uuid_bytes());
             *e.mutable_payload() = payload;
             e.set_type(mesh::DATA);
+            e.set_expect_response(false);
             return e;
         }
     }

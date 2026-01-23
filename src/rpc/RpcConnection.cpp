@@ -12,11 +12,15 @@
 
 using namespace std::chrono_literals;
 
-RpcConnection::RpcConnection(boost::asio::io_context &ioc, boost::asio::ip::tcp::socket sock,
-                             const std::string &peer_id, const boost::asio::ip::tcp::endpoint &local_ep,
-                             const boost::asio::ip::tcp::endpoint &remote_ep,
+RpcConnection::RpcConnection(boost::asio::io_context &ioc,
+                             boost::asio::ip::tcp::socket sock,
+                             const std::string &peer_id,
                              const std::shared_ptr<boost::asio::ssl::context> &ssl_ctx)
-    : ioc_(ioc), sock_(std::move(sock)), peer_id_(peer_id), local_endpoint_(local_ep), remote_endpoint_(remote_ep),
+    : ioc_(ioc),
+      sock_(std::move(sock)),
+      peer_id_(peer_id),
+      local_endpoint_(sock.local_endpoint()),
+      remote_endpoint_(sock.remote_endpoint()),
       ssl_ctx_(ssl_ctx) {
 }
 

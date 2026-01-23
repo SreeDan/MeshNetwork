@@ -1,8 +1,6 @@
 #pragma once
 #include <string>
 
-#include "envelope.pb.h"
-
 class IMessageSink {
 public:
     virtual ~IMessageSink() = default;

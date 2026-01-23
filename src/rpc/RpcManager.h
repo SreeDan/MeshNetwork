@@ -12,37 +12,45 @@ namespace rpc {
 
 class RpcManager : public std::enable_shared_from_this<RpcManager>, public ITransportLayer {
 public:
-    RpcManager(boost::asio::io_context &ioc, const std::string &peer_id,
+    RpcManager(boost::asio::io_context &ioc,
+               const std::string &peer_id,
+               int port,
                std::shared_ptr<IMessageSink> sink = nullptr,
                std::shared_ptr<boost::asio::ssl::context> ssl_ctx = nullptr);
 
     ~RpcManager();
 
+    void start_listening();
+
+    void shutdown();
+
     void set_sink(const std::shared_ptr<IMessageSink> &sink);
 
-    std::expected<std::string, std::string> create_connection(const std::string &remote_addr,
-                                                              boost::asio::ip::tcp::socket sock);
-
-    void accept_connection(const std::string &remote_addr,
-                           boost::asio::ip::tcp::socket sock);
-
-    bool remove_connection(const std::string &peer_id);
-
-    std::optional<std::shared_ptr<RpcConnection> > get_connection(const std::string &node_id);
-
-    std::expected<std::future<std::string>, SendError> send_message(const std::string &peer, mesh::Envelope &envelope,
-                                                                    std::optional<std::chrono::milliseconds> timeout =
-                                                                            std::nullopt);
-
-    void send_heartbeats(std::chrono::milliseconds timeout);
+    std::expected<std::string, std::string> connect(const std::string &host, int port);
 
     void add_auto_connection(const mesh::PeerIP &record);
 
     void remove_auto_connection(const mesh::PeerIP &record);
 
+    std::expected<std::future<std::string>, SendError> send_message(const std::string &peer, mesh::Envelope &envelope,
+                                                                    std::optional<std::chrono::milliseconds> timeout =
+                                                                            std::nullopt);
+
+    std::optional<std::shared_ptr<RpcConnection> > get_connection(const std::string &node_id);
+
+    // std::expected<std::string, std::string> create_connection(const std::string &remote_addr,
+    //                                                           boost::asio::ip::tcp::socket sock);
+    //
+    // void accept_connection(const std::string &remote_addr,
+    //                        boost::asio::ip::tcp::socket sock);
+    //
+    bool remove_connection(const std::string &peer_id);
+
 private:
     boost::asio::io_context &ioc_;
     const std::string &peer_id_;
+    int port_;
+    boost::asio::ip::tcp::acceptor acceptor_;
     std::weak_ptr<IMessageSink> sink_;
     std::shared_ptr<boost::asio::ssl::context> ssl_ctx_;
     boost::asio::steady_timer maintenance_timer_{ioc_};
@@ -58,6 +66,8 @@ private:
 
     void register_handlers();
 
+    std::expected<std::string, std::string> handle_new_connection(boost::asio::ip::tcp::socket socket, bool initiator);
+
     void dispatch_message(std::shared_ptr<RpcConnection> conn, const mesh::Envelope &envelope);
 
     void add_connection_internal(const std::string &peer_id, std::shared_ptr<RpcConnection> conn);
@@ -65,4 +75,11 @@ private:
     void run_maintenance_cycle();
 
     void check_for_auto_connections_locked();
+
+    void send_heartbeats(std::chrono::milliseconds timeout);
+
+    void do_accept();
+
+    std::expected<std::string, std::string> handle_connection_startup(std::shared_ptr<RpcConnection> conn,
+                                                                      bool initiator);
 };

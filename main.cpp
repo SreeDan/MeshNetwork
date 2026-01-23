@@ -82,11 +82,11 @@ int main(int argc, char **argv) {
 
     bool use_tls = false;
     std::string cert, key, ca;
-    if (config["ssl"] && config["ssl"]["cert-path"] && config["ssl"]["key-path"] && config["ssl"]["ca-path"]) {
+    if (config["tls"] && config["tls"]["cert-path"] && config["tls"]["key-path"] && config["tls"]["ca-path"]) {
         use_tls = true;
-        cert = config["ssl"]["cert-path"].as<std::string>();
-        key = config["ssl"]["key-path"].as<std::string>();
-        ca = config["ssl"]["ca-path"].as<std::string>();
+        cert = config["tls"]["cert-path"].as<std::string>();
+        key = config["tls"]["key-path"].as<std::string>();
+        ca = config["tls"]["ca-path"].as<std::string>();
     }
 
     boost::asio::io_context ioc;
@@ -135,7 +135,7 @@ int main(int argc, char **argv) {
             int port;
             std::string new_peer_id;
             if (iss >> host >> port >> new_peer_id) {
-                node.connect_to(host, port);
+                node.connect(host, port);
             } else {
                 std::cout << "Usage: connect <host> <port>\n";
             }
