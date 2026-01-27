@@ -1,6 +1,7 @@
 .idea/*
 build/*
 certs/*
+!certs/openssl.cnf
 out/*
 config/*
 docker-compose.yml

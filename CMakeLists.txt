@@ -36,6 +36,7 @@ add_library(mesh_core
         src/graph/GraphManager.cpp
         src/utils/MessageUtils.cpp
         src/utils/StringUtils.cpp
+        src/utils/FileUtils.cpp
         src/logging/Logger.cpp
         ${PROTO_SRCS}
         ${PROTO_HDRS}
