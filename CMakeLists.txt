@@ -38,6 +38,10 @@ add_library(mesh_core
         src/utils/StringUtils.cpp
         src/utils/FileUtils.cpp
         src/logging/Logger.cpp
+        src/crypto/IdentityManager.cpp
+        src/crypto/CertHelpers.cpp
+        src/crypto/CryptoHelpers.cpp
+        src/crypto/PacketSecurity.cpp
         ${PROTO_SRCS}
         ${PROTO_HDRS}
 )
@@ -66,6 +70,7 @@ target_include_directories(mesh_core PUBLIC
         ${CMAKE_SOURCE_DIR}/src/rpc
         ${CMAKE_SOURCE_DIR}/src/utils
         ${CMAKE_SOURCE_DIR}/src/logging
+        ${CMAKE_SOURCE_DIR}/src/crypto
 )
 
 add_executable(MeshNetworking main.cpp)
