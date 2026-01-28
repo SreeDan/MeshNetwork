@@ -26,6 +26,7 @@ add_library(mesh_core
         src/node/MeshNode.cpp
         src/net/Session.cpp
         src/net/Stream.cpp
+        src/net/udp/UdpTransport.cpp
         src/rpc/RpcConnection.cpp
         src/rpc/RpcManager.cpp
         src/rpc/handlers/HandshakeHandler.cpp
@@ -64,6 +65,7 @@ target_include_directories(mesh_core PUBLIC
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/graph
         ${CMAKE_SOURCE_DIR}/src/net
+        ${CMAKE_SOURCE_DIR}/src/net/udp
         ${CMAKE_SOURCE_DIR}/src/node
         ${CMAKE_SOURCE_DIR}/src/proto_types
         ${CMAKE_SOURCE_DIR}/src/routing
