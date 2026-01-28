@@ -23,6 +23,7 @@ namespace mesh {
             std::string to_peer_id,
             uint32_t ttl,
             std::string subtype,
+            mesh::TransportProtocol transport,
             std::string raw_data = "",
             bool expect_response = false
         );
@@ -46,6 +47,7 @@ namespace mesh {
             std::string to_peer_id,
             uint32_t ttl,
             std::string subtype,
+            mesh::TransportProtocol transport,
             std::string dest_public_key,
             std::string src_private_key,
             std::string unencrypted_data,

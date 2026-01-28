@@ -5,18 +5,11 @@
 
 namespace mesh {
     namespace envelope {
-        PeerIP MakePeerIP(boost::asio::ip::basic_endpoint<boost::asio::ip::tcp> endpoint) {
-            PeerIP ip;
-            ip.set_ip(endpoint.address().to_string());
-            ip.set_port(endpoint.port());
-            return ip;
-        }
-
-
-        PeerIP MakePeerIP(const std::string &addr, int port) {
+        PeerIP MakePeerIP(const std::string &addr, int tcp_port, int udp_port) {
             PeerIP ip;
             ip.set_ip(addr);
-            ip.set_port(port);
+            ip.set_tcp_port(tcp_port);
+            ip.set_udp_port(udp_port);
             return ip;
         }
 

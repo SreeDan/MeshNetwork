@@ -18,6 +18,9 @@ void HandshakeHandler::handle(std::shared_ptr<RpcConnection> conn, const mesh::E
         return;
     }
 
+    auto remote_address = conn->remote_endpoint_.address();
+    conn->remote_udp_endpoint_ = boost::asio::ip::udp::endpoint(remote_address, req.peer_record().peer_ip().udp_port());
+
     // Not the initiator
     if (env.expect_response()) {
         auto response = mesh::envelope::MakeHandshakeResponse(

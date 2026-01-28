@@ -15,10 +15,12 @@ using namespace std::chrono_literals;
 RpcConnection::RpcConnection(boost::asio::io_context &ioc,
                              boost::asio::ip::tcp::socket sock,
                              const std::string &peer_id,
+                             int udp_port,
                              const std::shared_ptr<boost::asio::ssl::context> &ssl_ctx)
     : ioc_(ioc),
       sock_(std::move(sock)),
       peer_id_(peer_id),
+      my_udp_port_(udp_port),
       local_endpoint_(sock.local_endpoint()),
       remote_endpoint_(sock.remote_endpoint()),
       ssl_ctx_(ssl_ctx) {
@@ -74,14 +76,16 @@ void RpcConnection::set_on_dispatch(std::function<void(std::shared_ptr<RpcConnec
 mesh::PeerIP RpcConnection::get_local_peer_ip() {
     mesh::PeerIP local_ip;
     local_ip.set_ip(local_endpoint_.address().to_string());
-    local_ip.set_port(local_endpoint_.port());
+    local_ip.set_tcp_port(local_endpoint_.port());
+    local_ip.set_udp_port(my_udp_port_);
     return local_ip;
 }
 
 mesh::PeerIP RpcConnection::get_remote_peer_ip() {
     mesh::PeerIP remote_ip;
     remote_ip.set_ip(remote_endpoint_.address().to_string());
-    remote_ip.set_port(remote_endpoint_.port());
+    remote_ip.set_tcp_port(remote_endpoint_.port());
+    remote_ip.set_udp_port(remote_udp_endpoint_.port()); // Defaults to 0 if not set
     return remote_ip;
 }
 
@@ -116,6 +120,10 @@ std::expected<mesh::PeerRecord, std::string> RpcConnection::send_handshake_reque
         mesh::Handshake handshake_response;
         if (!handshake_response.ParseFromString(response_envelope.payload()))
             return std::unexpected("failed to parse handshake payload");
+
+        auto remote_address = remote_endpoint_.address();
+        remote_udp_endpoint_ = boost::asio::ip::udp::endpoint(
+            remote_address, handshake_response.peer_record().peer_ip().udp_port());
 
         return handshake_response.peer_record();
     } catch (std::exception &e) {
@@ -174,7 +182,7 @@ std::future<std::string> RpcConnection::send_message(
     }
 
     mesh::PeerIP self_peer = get_local_peer_ip();
-    if (self_peer.ip() == envelope.to().ip() && self_peer.port() == envelope.to().port()) {
+    if (self_peer.ip() == envelope.to().ip() && self_peer.tcp_port() == envelope.to().tcp_port()) {
         Log::warn("rpc:send_message", {{"message_id", envelope.msg_id()}}, "sending message to itself");
     }
 
@@ -193,42 +201,6 @@ void RpcConnection::on_message(const boost::uuids::uuid &msg_id, const std::stri
     if (handler_cb_) {
         // Incoming request from peer
         handler_cb_(shared_from_this(), env);
-    }
-}
-
-void RpcConnection::respond_to_message(const boost::uuids::uuid &msg_id, const mesh::Envelope &env) {
-    if (env.type() == mesh::EnvelopeType::HANDSHAKE && env.expect_response()) {
-        // Deserialize the request
-        mesh::Handshake handshake_req;
-        if (!handshake_req.ParseFromString(env.payload())) {
-            std::cerr << "Failed to parse handshake request\n";
-            return;
-        }
-
-        mesh::PeerIP local_ip;
-        local_ip.set_ip(local_endpoint_.address().to_string());
-        local_ip.set_port(local_endpoint_.port());
-
-        auto response = mesh::envelope::MakeHandshakeResponse(local_ip, env.from(), peer_id_);
-        response.set_msg_id(env.msg_id());
-
-        session_->async_send_message(response.msg_id(), response.SerializeAsString());
-
-        if (handshake_promise_) {
-            try {
-                handshake_promise_->set_value(handshake_req.peer_record());
-            } catch (...) {
-            }
-        }
-    } else if (env.type() == mesh::EnvelopeType::HEARTBEAT && env.expect_response()) {
-        mesh::PeerIP local_ip;
-        local_ip.set_ip(local_endpoint_.address().to_string());
-        local_ip.set_port(local_endpoint_.port());
-
-        auto response = mesh::envelope::MakeHeartbeatResponse(local_ip, env.from());
-        response.set_msg_id(env.msg_id());
-
-        session_->async_send_message(response.msg_id(), response.SerializeAsString());
     }
 }
 

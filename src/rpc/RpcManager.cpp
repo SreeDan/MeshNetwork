@@ -7,24 +7,45 @@
 
 #include "EnvelopeUtils.h"
 #include "Logger.h"
+#include "MessageUtils.h"
 #include "handlers/HandshakeHandler.h"
 #include "handlers/HeartbeatHandler.h"
 #include "packet.pb.h"
+#include "RoutedPacketUtils.h"
 
 RpcManager::RpcManager(boost::asio::io_context &ioc,
                        const std::string &peer_id,
-                       int port,
+                       int tcp_port,
+                       int udp_port,
                        std::shared_ptr<IMessageSink> sink,
                        std::shared_ptr<boost::asio::ssl::context> ssl_ctx)
     : ioc_(ioc),
-      port_(port),
+      tcp_port_(tcp_port),
+      udp_port_(udp_port),
       acceptor_(ioc),
       peer_id_(peer_id),
       sink_(sink),
+      udp_transport_(std::make_unique<UdpTransport>(ioc, udp_port)),
       ssl_ctx_(std::move(ssl_ctx)) {
     register_handlers();
     using namespace std::chrono_literals;
     heartbeat_thread_ = std::thread([this] { send_heartbeats(300ms); });
+
+    udp_transport_->set_on_receive([this](boost::asio::ip::udp::endpoint ep, std::string bytes) {
+        if (std::shared_ptr<IMessageSink> s = this->sink_.lock()) {
+            std::lock_guard<std::mutex> guard(mu_);
+            std::string incoming_ip = ep.address().to_string();
+
+            auto it = connections_by_ip_.find(ep.address().to_string());
+            if (it != connections_by_ip_.end()) {
+                s->push_data_bytes(it->second->get_remote_peer_id(), bytes);
+            } else {
+                Log::warn("RpcManager", {{"ip", ep.address().to_string()}, {"port", ep.port()}},
+                          "Dropped UDP packet: IP not found in active connections");
+            }
+        }
+    });
+
     run_maintenance_cycle();
     start_listening();
 }
@@ -48,17 +69,17 @@ void RpcManager::start_listening() {
 
         acceptor_.bind(
             boost::asio::ip::tcp::endpoint(
-                boost::asio::ip::tcp::v4(), port_),
+                boost::asio::ip::tcp::v4(), tcp_port_),
             ec);
 
         if (ec)
             throw std::runtime_error(
-                "bind failed on port " + std::to_string(port_) +
+                "bind failed on port " + std::to_string(tcp_port_) +
                 ": " + ec.message());
 
         acceptor_.listen(boost::asio::socket_base::max_listen_connections, ec);
         if (ec) throw std::runtime_error("listen failed: " + ec.message());
-        Log::info("RpcManager", {{"port", port_}}, "Listening for connections");
+        Log::info("RpcManager", {{"port", tcp_port_}}, "Listening for connections");
         do_accept();
     } catch (std::exception &e) {
         Log::error("RpcManager", {{"error", e.what()}}, "Failed to start listening");
@@ -143,7 +164,7 @@ std::expected<std::string, std::string> RpcManager::handle_connection_startup(st
 
 std::expected<std::string, std::string> RpcManager::handle_new_connection(boost::asio::ip::tcp::socket socket,
                                                                           bool initiator) {
-    auto rpc_connection = std::make_shared<RpcConnection>(ioc_, std::move(socket), peer_id_, ssl_ctx_);
+    auto rpc_connection = std::make_shared<RpcConnection>(ioc_, std::move(socket), peer_id_, udp_port_, ssl_ctx_);
 
     rpc_connection->set_on_dispatch([this](auto conn, const auto &env) {
         this->dispatch_message(std::move(conn), env);
@@ -200,7 +221,7 @@ std::optional<std::shared_ptr<RpcConnection> > RpcManager::get_connection(const 
     return conn;
 }
 
-std::expected<std::future<std::string>, SendError> RpcManager::send_message(
+std::expected<std::future<std::string>, SendError> RpcManager::send_tcp_message(
     const std::string &peer, mesh::Envelope &envelope,
     std::optional<std::chrono::milliseconds> timeout) {
     std::shared_ptr<RpcConnection> conn;
@@ -220,10 +241,32 @@ std::expected<std::future<std::string>, SendError> RpcManager::send_message(
     }
 }
 
+std::expected<void, SendError> RpcManager::send_udp_message(const std::string &peer, mesh::RoutedPacket &pkt) {
+    std::shared_ptr<RpcConnection> conn;
+    {
+        std::lock_guard<std::mutex> guard(mu_);
+        auto it = connections_by_peer_.find(peer);
+        if (it == connections_by_peer_.end()) {
+            return std::unexpected(SendError{INVALID_PEER});
+        }
+        conn = it->second;
+    }
+
+    auto udp_endpoint = conn->remote_udp_endpoint_;
+    udp_transport_->send_packet(udp_endpoint, pkt);
+
+    return {};
+}
+
 void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
-    // maybe change to 5 consecutive failures -> then drop the connection
     using namespace std::chrono_literals;
     std::unordered_map<std::string, int> consecutive_failed;
+
+    // dummy packet meant for UDP keepalives and UDP hole punching
+    mesh::RoutedPacket udp_keepalive_pkt = mesh::packet::MakeBinaryRoutedPacket(
+        peer_id_, "", 1, "heartbeat", mesh::UDP
+    );
+
     while (true) {
         std::vector<std::string> peers;
         {
@@ -249,6 +292,17 @@ void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
 
             auto result = conn->send_message(env, timeout);
             futures.insert({peer, std::move(result)});
+
+            // UDP heartbeat (for NAT hole punching)
+            if (conn->remote_udp_endpoint_.port() != 0) {
+                udp_keepalive_pkt.set_id(generate_uuid_bytes());
+                udp_keepalive_pkt.set_to_peer_id(peer);
+                // pure fire and forget
+                // The idea is that the router sees this outgoing traffic and refreshes is NAT mapping.
+                // The destination router sees incoming traffic from us and keeps the hole open.
+                Log::debug("heartbeat", {}, "sending udp keepalive");
+                udp_transport_->send_packet(conn->remote_udp_endpoint_, udp_keepalive_pkt);
+            }
         }
 
         for (auto &pair: futures) {
@@ -300,7 +354,7 @@ void RpcManager::add_connection_internal(const std::string &peer_id, std::shared
 void RpcManager::add_auto_connection(const mesh::PeerIP &record) {
     std::lock_guard<std::mutex> guard(mu_);
     auto it = std::find_if(auto_connections_.begin(), auto_connections_.end(), [&](const mesh::PeerIP &r) {
-        return record.ip() == r.ip() && record.port() == r.port();
+        return record.ip() == r.ip() && record.tcp_port() == r.tcp_port();
     });
 
     if (it != auto_connections_.end()) {
@@ -313,7 +367,7 @@ void RpcManager::add_auto_connection(const mesh::PeerIP &record) {
 void RpcManager::remove_auto_connection(const mesh::PeerIP &record) {
     std::lock_guard<std::mutex> guard(mu_);
     auto it = std::find_if(auto_connections_.begin(), auto_connections_.end(), [&](const mesh::PeerIP &r) {
-        return record.ip() == r.ip() && record.port() == r.port();
+        return record.ip() == r.ip() && record.tcp_port() == r.tcp_port();
     });
 
     if (it != auto_connections_.end()) {
@@ -347,7 +401,7 @@ void RpcManager::check_for_auto_connections_locked() {
 
         std::thread([this, target_ip]() {
             try {
-                connect(target_ip.ip(), target_ip.port());
+                connect(target_ip.ip(), target_ip.tcp_port());
             } catch (const std::exception &e) {
                 Log::warn("maintenance", {{"err", e.what()}}, "reconnect failed");
             }

@@ -23,7 +23,7 @@ MeshNode::MeshNode(
       udp_port_(udp_port),
       peer_id_(peer_id),
       ssl_ctx_(std::move(ssl_ctx)),
-      rpc_connections(std::make_shared<RpcManager>(ioc, peer_id, tcp_port)),
+      rpc_connections(std::make_shared<RpcManager>(ioc, peer_id, tcp_port, udp_port)),
       router_(std::make_shared<MeshRouter>(ioc, peer_id)),
       identity_(std::move(identity_manager_)),
       request_tracker_(ioc),
@@ -200,17 +200,17 @@ void MeshNode::handle_incoming_packet(const mesh::RoutedPacket &pkt) {
         auto it = handlers_.find(pkt.subtype());
         if (it != handlers_.end()) {
             const std::string &from = pkt.from_peer_id();
-            auto reply_cb = [this, from, req_id = pkt.id(), needs_reply = pkt.expect_response()]
+            auto reply_cb = [this, from, pkt = pkt]
             (std::string &response_payload) {
-                if (!needs_reply) return;
+                if (!pkt.expect_response()) return;
 
                 // Create the Response Packet matching the original ID
                 auto resp = mesh::packet::MakeBinaryRoutedPacket(
-                    peer_id_, from, 15, "",
+                    peer_id_, from, 15, "", pkt.transport(),
                     response_payload,
                     false
                 );
-                resp.set_id(req_id);
+                resp.set_id(pkt.id());
 
                 // TODO: handle encryption
 
@@ -220,7 +220,7 @@ void MeshNode::handle_incoming_packet(const mesh::RoutedPacket &pkt) {
 
             it->second(from, pkt.binary_data(), reply_cb);
         } else {
-            Log::warn("MeshNode", {{"subtype", pkt.subtype()}}, "No handler for message type");
+            Log::debug("MeshNode", {{"subtype", pkt.subtype()}}, "No handler for message type");
         }
     } else if (pkt.type() == mesh::PacketType::TEXT) {
         Log::info("message", {{"from", pkt.from_peer_id()}}, pkt.text());
@@ -257,13 +257,13 @@ void MeshNode::generate_topology_graph(const std::string &filename) {
 }
 
 
-void MeshNode::add_auto_connection(const std::string &ip_address, int port) {
-    auto peer_ip = mesh::envelope::MakePeerIP(ip_address, port);
+void MeshNode::add_auto_connection(const std::string &ip_address, int tcp_port) {
+    auto peer_ip = mesh::envelope::MakePeerIP(ip_address, tcp_port, 0);
     rpc_connections->add_auto_connection(peer_ip);
 }
 
-void MeshNode::remove_auto_connection(const std::string &ip_address, int port) {
-    auto peer_ip = mesh::envelope::MakePeerIP(ip_address, port);
+void MeshNode::remove_auto_connection(const std::string &ip_address, int tcp_port) {
+    auto peer_ip = mesh::envelope::MakePeerIP(ip_address, tcp_port, 0);
     rpc_connections->remove_auto_connection(peer_ip);
 }
 

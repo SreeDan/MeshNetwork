@@ -13,6 +13,7 @@ std::shared_ptr<boost::asio::ssl::context> make_ssl_context(
     const std::string &ca_file
 ) {
     try {
+        OPENSSL_init_ssl(OPENSSL_INIT_NO_LOAD_CONFIG, NULL);
         std::shared_ptr<boost::asio::ssl::context> ssl_ctx;
 
         // initialize context for TLS v1.2 or v1.3
@@ -126,10 +127,10 @@ int main(int argc, char **argv) {
             }
 
             std::string ip = elem["ip"].as<std::string>();
-            int port = elem["port"].as<int>();
+            int tcp_port = elem["port"].as<int>();
 
-            Log::debug("yaml_parser", {{"ip", ip}, {"port", port}}, "detected auto connect configuration");
-            node.add_auto_connection(ip, port);
+            Log::debug("yaml_parser", {{"ip", ip}, {"port", tcp_port}}, "detected auto connect configuration");
+            node.add_auto_connection(ip, tcp_port);
         }
     }
 
