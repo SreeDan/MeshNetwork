@@ -29,7 +29,7 @@ struct NeighborView {
 class MeshRouter : public IMessageSink {
 public:
     using OnMessageReceived = std::function<void(const mesh::RoutedPacket &pkt)>;
-    using OnPacketForMe = std::function<void(mesh::RoutedPacket)>;
+    using OnPacketForMe = std::function<void(mesh::RoutedPacket &)>;
     static constexpr int DEFAULT_TTL = 10;
 
     MeshRouter(boost::asio::io_context &ioc, const std::string &self_id,
