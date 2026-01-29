@@ -158,14 +158,14 @@ void MeshRouter::route_data_packet(const std::string &immediate_src, const std::
     }
 
     auto dedup_key = std::make_tuple(pkt_id, pkt.expect_response());
-    if (immediate_src != self_id_ && seen_ids_.contains(dedup_key)) {
+    if (immediate_src != self_id_ && seen_packet_ids_.contains(dedup_key)) {
         // Only log if it wasn't a broadcast (broadcasts loop frequently by definition)
         if (!is_broadcast) {
             Log::warn("router", {{"packet_id", pkt_id}}, "dropping packet, loop detected");
         }
         return;
     }
-    seen_ids_.insert(dedup_key);
+    seen_packet_ids_.insert(dedup_key);
 
 
     // forwarding
@@ -350,7 +350,7 @@ void MeshRouter::run_periodic_maintenance() {
         ++gc_it;
     }
 
-    // TODO: Remove seen messages inside the DEDUP window
+    seen_packet_ids_.cleanup();
 }
 
 void MeshRouter::send_triggered_updates() {

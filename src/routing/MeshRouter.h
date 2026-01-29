@@ -86,7 +86,7 @@ private:
 
     // TODO: change for something more robust like LRU which removes old ids
     // Set based off {peer ids, request/response=true/false}
-    DedupSet<DedupKey, TupleHash> seen_ids_;
+    TimedDedupSet<DedupKey, TupleHash> seen_packet_ids_;
 
     // bool ignore_messages_{false};
     struct RouterEvent {
