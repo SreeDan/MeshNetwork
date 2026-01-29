@@ -6,6 +6,11 @@ message RouteTable {
   map<string, uint32> costs = 1;
 }
 
+enum TransportProtocol {
+  TCP = 0;
+  UDP = 1;
+}
+
 enum PacketType  {
   ROUTING_UPDATE = 0;
   TEXT = 1;
@@ -18,16 +23,17 @@ message RoutedPacket {
   string to_peer_id = 3; // destination, empty meaning broadcast - everyone should receive the packet
   uint32 ttl = 4;  // # of hops allowed
   PacketType type = 5;
-  string subtype = 6; // subtype of message (e.g. "myapp.Message1")
-  bool expect_response = 7;
+  TransportProtocol transport = 6;
+  string subtype = 7; // subtype of message (e.g. "myapp.Message1")
+  bool expect_response = 8;
 
-  bytes signature = 8;             // signed by Source
-  bytes encrypted_session_key = 9; // RSA Encrypted (for the dest)
+  bytes signature = 9;             // signed by Source
+  bytes encrypted_session_key = 10; // RSA Encrypted (for the dest)
 
   oneof payload_variant {
-    string text = 10;
-    RouteTable route_table = 11;
-    bytes binary_data = 12;
-    bytes encrypted_payload = 13; // AES Encrypted
+    string text = 11;
+    RouteTable route_table = 12;
+    bytes binary_data = 13;
+    bytes encrypted_payload = 14; // AES Encrypted
   }
 }

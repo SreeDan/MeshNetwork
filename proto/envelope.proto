@@ -12,7 +12,8 @@ enum EnvelopeType {
 
 message PeerIP {
   string ip = 1;
-  int32 port = 2;
+  int32 tcp_port = 2;
+  int32 udp_port = 3;
 }
 
 // Right now, can get this information from the remote address

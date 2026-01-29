@@ -40,9 +40,12 @@ bool IdentityManager::has_key(const std::string &peer_id) {
     return trusted_keys_.contains(peer_id);
 }
 
-std::string IdentityManager::get_public_key(const std::string &peer_id) {
+std::optional<std::string> IdentityManager::get_public_key(const std::string &peer_id) {
     std::lock_guard<std::mutex> guard(mu_);
-    return trusted_keys_[peer_id];
+    if (trusted_keys_.contains(peer_id)) {
+        return trusted_keys_.at(peer_id);
+    }
+    return std::nullopt;
 }
 
 void IdentityManager::add_trusted_peer(const std::string &peer_id, const std::string &pub_key) {

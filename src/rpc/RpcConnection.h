@@ -4,6 +4,7 @@
 #include <string>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/ip/udp.hpp>
 
 #include "Session.h"
 #include "envelope.pb.h"
@@ -20,6 +21,7 @@ public:
     RpcConnection(boost::asio::io_context &ioc,
                   boost::asio::ip::tcp::socket sock,
                   const std::string &peer_id,
+                  int udp_port,
                   const std::shared_ptr<boost::asio::ssl::context> &ssl_ctx);
 
     ~RpcConnection();
@@ -57,12 +59,14 @@ public:
 
     boost::asio::ip::basic_endpoint<boost::asio::ip::tcp> local_endpoint_;
     boost::asio::ip::basic_endpoint<boost::asio::ip::tcp> remote_endpoint_;
+    boost::asio::ip::udp::endpoint remote_udp_endpoint_;
 
 private:
     boost::asio::io_context &ioc_;
     boost::asio::ip::tcp::socket sock_;
 
     const std::string peer_id_;
+    const int my_udp_port_;
     std::shared_ptr<boost::asio::ssl::context> ssl_ctx_;
     std::string authenticated_remote_id_;
 
@@ -75,8 +79,6 @@ private:
     std::function<void(std::shared_ptr<RpcConnection>, const mesh::Envelope &)> handler_cb_;
 
     void on_message(const boost::uuids::uuid &msg_id, const std::string &payload);
-
-    void respond_to_message(const boost::uuids::uuid &msg_id, const mesh::Envelope &env);
 
     void store_response(const boost::uuids::uuid &msg_id, const std::string &resp_payload);
 };

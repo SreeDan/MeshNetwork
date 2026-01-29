@@ -2,7 +2,6 @@
 
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 BUILD_DIR="$PROJECT_ROOT/build"
-SSL_CONFIG="$PROJECT_ROOT/certs/openssl.cnf"
 DEBUG=false
 
 while getopts "dn:v" flag; do
@@ -18,8 +17,6 @@ while getopts "dn:v" flag; do
 done
 
 shift $((OPTIND-1))
-
-export OPENSSL_CONF="$SSL_CONFIG"
 
 echo "--- Building ---"
 

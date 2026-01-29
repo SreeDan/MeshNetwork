@@ -186,9 +186,13 @@ void MeshRouter::route_data_packet(const std::string &immediate_src, const std::
             continue;
         };
 
-        mesh::Envelope env = mesh::envelope::MakeGenericData(forward_pkt.SerializeAsString());
         if (std::shared_ptr<ITransportLayer> t = transport_.lock()) {
-            t->send_message(next_peer_id, env);
+            if (forward_pkt.transport() == mesh::TransportProtocol::TCP) {
+                mesh::Envelope env = mesh::envelope::MakeGenericData(forward_pkt.SerializeAsString());
+                t->send_tcp_message(next_peer_id, env);
+            } else if (forward_pkt.transport() == mesh::TransportProtocol::UDP) {
+                t->send_udp_message(next_peer_id, forward_pkt);
+            }
         }
     }
 }
@@ -386,7 +390,7 @@ void MeshRouter::send_triggered_updates() {
         env.set_payload(pkt.SerializeAsString());
 
         if (std::shared_ptr t = transport_.lock()) {
-            t->send_message(neighbor_id, env);
+            t->send_tcp_message(neighbor_id, env);
         }
     }
 }
@@ -419,7 +423,7 @@ void MeshRouter::broadcast_full_table() {
         env.set_payload(pkt.SerializeAsString());
 
         if (std::shared_ptr t = transport_.lock()) {
-            t->send_message(neighbor_id, env);
+            t->send_tcp_message(neighbor_id, env);
         }
     }
 }

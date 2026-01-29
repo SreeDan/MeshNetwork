@@ -4,6 +4,7 @@
 #include <iostream>
 #include <utility>
 
+#include "CertHelpers.h"
 #include "crypto.pb.h"
 #include "EnvelopeUtils.h"
 #include "GraphManager.h"
@@ -16,16 +17,17 @@ MeshNode::MeshNode(
     const int udp_port,
     const std::string &peer_id,
     std::shared_ptr<boost::asio::ssl::context> ssl_ctx,
-    std::shared_ptr<IdentityManager> identity_manager_,
+    std::shared_ptr<IdentityManager> identity_manager,
     bool encrypt_messages)
     : ioc_(ioc),
       tcp_port_(tcp_port),
       udp_port_(udp_port),
       peer_id_(peer_id),
       ssl_ctx_(std::move(ssl_ctx)),
-      rpc_connections(std::make_shared<RpcManager>(ioc, peer_id, tcp_port)),
+      rpc_connections(std::make_shared<RpcManager>(ioc, peer_id, tcp_port, udp_port)),
       router_(std::make_shared<MeshRouter>(ioc, peer_id)),
-      identity_(std::move(identity_manager_)),
+      identity_(identity_manager),
+      security_(std::make_unique<PacketSecurity>(identity_manager)),
       request_tracker_(ioc),
       encrypt_messages_(encrypt_messages),
       identity_request_subtype(mesh::IdentityRequest::descriptor()->full_name()),
@@ -33,7 +35,7 @@ MeshNode::MeshNode(
     rpc_connections->set_sink(router_);
     router_->set_transport(rpc_connections);
     router_->set_on_packet_for_me(
-        [this](const mesh::RoutedPacket &pkt) {
+        [this](mesh::RoutedPacket &pkt) {
             this->handle_incoming_packet(pkt);
         });
 }
@@ -48,7 +50,7 @@ void MeshNode::stop() {
 }
 
 void MeshNode::setup_builtin_handlers() {
-    on<mesh::TopologyRequest>(
+    on<mesh::TopologyRequest, mesh::TopologyResponse>(
         [this](const std::string &from, const mesh::TopologyRequest &req, auto reply) {
             auto neighbors = router_->get_direct_neighbors();
             mesh::TopologyResponse resp;
@@ -61,7 +63,7 @@ void MeshNode::setup_builtin_handlers() {
         }
     );
 
-    on<mesh::PingRequest>(
+    on<mesh::PingRequest, mesh::PingResponse>(
         [this](const std::string &from, const mesh::PingRequest &req, auto reply) {
             mesh::PingResponse resp;
             resp.set_message("hello from" + peer_id_);
@@ -71,12 +73,21 @@ void MeshNode::setup_builtin_handlers() {
         }
     );
 
-    on<mesh::IdentityRequest>(
+    on<mesh::IdentityRequest, mesh::IdentityResponse>(
         [this](const std::string &from, const mesh::IdentityRequest &req, auto reply) {
+            try {
+                std::string pub_key = CertHelpers::extract_pubkey_from_cert(req.certificate_pem());
+                this->identity_->add_trusted_peer(from, pub_key);
+                handle_pending_incoming_packets(from);
+                handle_pending_outgoing_packets(from);
+            } catch (const std::exception &e) {
+                Log::error("identity_request", {{"peer", from}, {"err", e.what()}},
+                           "failed to extract public key from response");
+            }
+
             mesh::IdentityResponse resp;
             resp.set_certificate_pem(identity_->get_my_cert());
             std::string bytes = resp.SerializeAsString();
-            Log::info("identity", {{"peer_id", from}}, "received request");
             reply(bytes);
         }
     );
@@ -159,10 +170,7 @@ bool MeshNode::should_send_identity_request(const std::string &peer_id) {
     return true;
 }
 
-void MeshNode::maybe_decrypt_packet(const mesh::RoutedPacket &pkt) {
-}
-
-void MeshNode::handle_incoming_packet(const mesh::RoutedPacket &pkt) {
+void MeshNode::handle_incoming_packet(mesh::RoutedPacket &pkt) {
     if (ignore_all_incoming_messages_) return;
 
     if (pkt.has_encrypted_payload()) {
@@ -185,8 +193,13 @@ void MeshNode::handle_incoming_packet(const mesh::RoutedPacket &pkt) {
             Log::warn("handle_incoming_packet",
                       {{"from", pkt.from_peer_id()}, {"err", expected_plaintext.error()}},
                       "failed to decrypt packet");
+            return;
         }
-        return;
+
+        pkt.clear_encrypted_payload();
+        pkt.clear_signature();
+        pkt.clear_encrypted_session_key();
+        pkt.set_binary_data(expected_plaintext.value());
     }
 
     std::string pkt_id = to_hex(pkt.id());
@@ -200,27 +213,35 @@ void MeshNode::handle_incoming_packet(const mesh::RoutedPacket &pkt) {
         auto it = handlers_.find(pkt.subtype());
         if (it != handlers_.end()) {
             const std::string &from = pkt.from_peer_id();
-            auto reply_cb = [this, from, req_id = pkt.id(), needs_reply = pkt.expect_response()]
+            auto reply_cb = [this, from, pkt = pkt, subtype = it->second.ResponseSubtype]
             (std::string &response_payload) {
-                if (!needs_reply) return;
+                if (!pkt.expect_response()) return;
 
                 // Create the Response Packet matching the original ID
                 auto resp = mesh::packet::MakeBinaryRoutedPacket(
-                    peer_id_, from, 15, "",
+                    peer_id_, from, 15, subtype, pkt.transport(),
                     response_payload,
                     false
                 );
-                resp.set_id(req_id);
+                resp.set_id(pkt.id());
 
-                // TODO: handle encryption
+                bool is_identity_exchange = (pkt.subtype() == this->identity_request_subtype);
+
+                if (this->encrypt_messages_ && !is_identity_exchange) {
+                    if (!this->security_->secure_packet(resp, from, response_payload)) {
+                        Log::error("handle_incoming_packet", {{"to", from}}, "failed to encrypt response");
+                        return;
+                    }
+                } else {
+                    resp.set_binary_data(response_payload);
+                }
 
                 router_->send_packet(resp);
             };
 
-
-            it->second(from, pkt.binary_data(), reply_cb);
+            it->second.handler(from, pkt.binary_data(), reply_cb);
         } else {
-            Log::warn("MeshNode", {{"subtype", pkt.subtype()}}, "No handler for message type");
+            Log::debug("MeshNode", {{"subtype", pkt.subtype()}}, "No handler for message type");
         }
     } else if (pkt.type() == mesh::PacketType::TEXT) {
         Log::info("message", {{"from", pkt.from_peer_id()}}, pkt.text());
@@ -257,19 +278,20 @@ void MeshNode::generate_topology_graph(const std::string &filename) {
 }
 
 
-void MeshNode::add_auto_connection(const std::string &ip_address, int port) {
-    auto peer_ip = mesh::envelope::MakePeerIP(ip_address, port);
+void MeshNode::add_auto_connection(const std::string &ip_address, int tcp_port) {
+    auto peer_ip = mesh::envelope::MakePeerIP(ip_address, tcp_port, 0);
     rpc_connections->add_auto_connection(peer_ip);
 }
 
-void MeshNode::remove_auto_connection(const std::string &ip_address, int port) {
-    auto peer_ip = mesh::envelope::MakePeerIP(ip_address, port);
+void MeshNode::remove_auto_connection(const std::string &ip_address, int tcp_port) {
+    auto peer_ip = mesh::envelope::MakePeerIP(ip_address, tcp_port, 0);
     rpc_connections->remove_auto_connection(peer_ip);
 }
 
 
 void MeshNode::send_identity_request(const std::string &dest) {
     mesh::IdentityRequest req;
+    req.set_certificate_pem(identity_->get_my_cert());
     send_request_async<mesh::IdentityRequest, mesh::IdentityResponse>(
         dest,
         req,
@@ -280,9 +302,16 @@ void MeshNode::send_identity_request(const std::string &dest) {
             }
 
             const auto &unwrapped_resp = resp.value();
-            this->identity_->add_trusted_peer(unwrapped_resp.peer_id(), unwrapped_resp.certificate_pem());
-            handle_pending_incoming_packets(peer);
-            handle_pending_outgoing_packets(peer);
+
+            try {
+                std::string pub_key = CertHelpers::extract_pubkey_from_cert(unwrapped_resp.certificate_pem());
+                this->identity_->add_trusted_peer(peer, pub_key);
+                handle_pending_incoming_packets(peer);
+                handle_pending_outgoing_packets(peer);
+            } catch (const std::exception &e) {
+                Log::error("identity_request", {{"peer", peer}, {"err", e.what()}},
+                           "failed to extract public key from response");
+            }
         }
     );
 }
@@ -297,6 +326,9 @@ void MeshNode::handle_pending_incoming_packets(const std::string &src) {
 void MeshNode::handle_pending_outgoing_packets(const std::string &dest) {
     std::vector<mesh::RoutedPacket> packets = identity_->pop_outgoing_pending_packets(dest);
     for (auto &pkt: packets) {
+        if (!security_->secure_packet(pkt, pkt.to_peer_id(), pkt.binary_data())) {
+            continue;
+        }
         router_->send_packet(pkt);
     }
 }

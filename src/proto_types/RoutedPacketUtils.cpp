@@ -41,6 +41,7 @@ namespace mesh {
             std::string to_peer_id,
             uint32_t ttl,
             std::string subtype,
+            mesh::TransportProtocol transport,
             std::string raw_data,
             bool expect_response
         ) {
@@ -51,6 +52,7 @@ namespace mesh {
             pkt.set_ttl(ttl);
             pkt.set_type(PacketType::BINARY);
             pkt.set_subtype(subtype);
+            pkt.set_transport(transport);
             pkt.set_binary_data(raw_data.data(), raw_data.size());
             pkt.set_expect_response(expect_response);
             return pkt;
@@ -97,6 +99,7 @@ namespace mesh {
             std::string to_peer_id,
             uint32_t ttl,
             std::string subtype,
+            mesh::TransportProtocol transport,
             std::string dest_public_key,
             std::string src_private_key,
             std::string unencrypted_data,
@@ -109,6 +112,7 @@ namespace mesh {
             pkt.set_ttl(ttl);
             pkt.set_type(PacketType::BINARY);
             pkt.set_subtype(subtype);
+            pkt.set_transport(transport);
             try {
                 std::string session_key = CryptoHelpers::generate_aes_key();
 

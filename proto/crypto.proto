@@ -1,10 +1,11 @@
 syntax = "proto3";
 package mesh;
 
-message IdentityRequest{}
+message IdentityRequest{
+  string certificate_pem = 1;
+}
 
 // Peer Identity
 message IdentityResponse {
-  string peer_id = 1;
-  string certificate_pem = 2;
+  string certificate_pem = 1;
 }

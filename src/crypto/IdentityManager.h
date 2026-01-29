@@ -16,7 +16,7 @@ public:
 
     bool has_key(const std::string &peer_id);
 
-    std::string get_public_key(const std::string &peer_id);
+    std::optional<std::string> get_public_key(const std::string &peer_id);
 
     void add_trusted_peer(const std::string &peer_id, const std::string &pub_key);
 

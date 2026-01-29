@@ -9,9 +9,7 @@ namespace mesh {
     const std::string MeshVersion = "1.0.0";
 
     namespace envelope {
-        PeerIP MakePeerIP(boost::asio::ip::basic_endpoint<boost::asio::ip::tcp> endpoint);
-
-        PeerIP MakePeerIP(const std::string &addr, int port);
+        PeerIP MakePeerIP(const std::string &addr, int tcp_port, int udp_port);
 
         Envelope MakeCustomText(
             const PeerIP &from,

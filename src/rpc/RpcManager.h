@@ -5,6 +5,7 @@
 #include "RpcConnection.h"
 #include "envelope.pb.h"
 #include "IMessageSink.h"
+#include "UdpTransport.h"
 
 namespace rpc {
     const int MAX_HEARTBEAT_FAILURES = 5;
@@ -14,7 +15,8 @@ class RpcManager : public std::enable_shared_from_this<RpcManager>, public ITran
 public:
     RpcManager(boost::asio::io_context &ioc,
                const std::string &peer_id,
-               int port,
+               int tcp_port,
+               int udp_port,
                std::shared_ptr<IMessageSink> sink = nullptr,
                std::shared_ptr<boost::asio::ssl::context> ssl_ctx = nullptr);
 
@@ -32,26 +34,25 @@ public:
 
     void remove_auto_connection(const mesh::PeerIP &record);
 
-    std::expected<std::future<std::string>, SendError> send_message(const std::string &peer, mesh::Envelope &envelope,
-                                                                    std::optional<std::chrono::milliseconds> timeout =
-                                                                            std::nullopt);
+    std::expected<std::future<std::string>, SendError> send_tcp_message(
+        const std::string &peer, mesh::Envelope &envelope,
+        std::optional<std::chrono::milliseconds> timeout =
+                std::nullopt);
+
+    std::expected<void, SendError> send_udp_message(const std::string &peer, mesh::RoutedPacket &pkt);
 
     std::optional<std::shared_ptr<RpcConnection> > get_connection(const std::string &node_id);
 
-    // std::expected<std::string, std::string> create_connection(const std::string &remote_addr,
-    //                                                           boost::asio::ip::tcp::socket sock);
-    //
-    // void accept_connection(const std::string &remote_addr,
-    //                        boost::asio::ip::tcp::socket sock);
-    //
     bool remove_connection(const std::string &peer_id);
 
 private:
     boost::asio::io_context &ioc_;
     const std::string &peer_id_;
-    int port_;
+    int tcp_port_;
+    int udp_port_;
     boost::asio::ip::tcp::acceptor acceptor_;
     std::weak_ptr<IMessageSink> sink_;
+    std::shared_ptr<UdpTransport> udp_transport_;
     std::shared_ptr<boost::asio::ssl::context> ssl_ctx_;
     boost::asio::steady_timer maintenance_timer_{ioc_};
 

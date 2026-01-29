@@ -29,7 +29,7 @@ struct NeighborView {
 class MeshRouter : public IMessageSink {
 public:
     using OnMessageReceived = std::function<void(const mesh::RoutedPacket &pkt)>;
-    using OnPacketForMe = std::function<void(mesh::RoutedPacket)>;
+    using OnPacketForMe = std::function<void(mesh::RoutedPacket &)>;
     static constexpr int DEFAULT_TTL = 10;
 
     MeshRouter(boost::asio::io_context &ioc, const std::string &self_id,
@@ -47,19 +47,6 @@ public:
 
     void set_transport(std::shared_ptr<ITransportLayer> transport);
 
-    // void send_packet(mesh::RoutedPacket &pkt);
-    //
-    // void send_text(const std::string &dest_id, const std::string &text);
-    //
-    // void send_bytes(const std::string &dest_id, const std::vector<uint8_t> &bytes);
-    //
-    // std::future<std::string> send_request(mesh::RoutedPacket &pkt, std::chrono::milliseconds timeout);
-
-    // void send_broadcast_request(mesh::RoutedPacket &pkt,
-    //                             std::chrono::milliseconds duration,
-    //                             std::function<void(const std::string &, std::string)> on_response,
-    //                             const std::function<void()> &on_complete);
-
     // IMessageSink impl
     void push_data_bytes(const std::string &from_peer, const std::string &payload_bytes) override;
 
@@ -74,8 +61,6 @@ public:
     std::vector<std::string> get_direct_neighbors();
 
     std::vector<std::string> get_peers_in_network();
-
-    // void set_ignore_messages(bool ignore);
 
     // // Debug
     // void generate_topology_graph(const std::string &destination_path);

@@ -13,9 +13,9 @@ PacketSecurity::PacketSecurity(std::shared_ptr<IdentityManager> identity_manager
 
 bool PacketSecurity::secure_packet(mesh::RoutedPacket &pkt, const std::string &target_peer_id,
                                    const std::string &raw_payload) {
-    std::string target_pub_key = identity_manager_->get_public_key(target_peer_id);
+    std::optional<std::string> target_pub_key = identity_manager_->get_public_key(target_peer_id);
 
-    if (target_pub_key.empty()) {
+    if (!target_pub_key.has_value() || target_pub_key.value().empty()) {
         Log::warn("PacketSecurity", {{"target", target_peer_id}}, "encryption aborted, unknown identity.");
         return false;
     }
@@ -23,7 +23,7 @@ bool PacketSecurity::secure_packet(mesh::RoutedPacket &pkt, const std::string &t
     try {
         std::string session_key = CryptoHelpers::generate_aes_key();
         std::string enc_payload = CryptoHelpers::aes_encrypt(session_key, raw_payload);
-        std::string enc_session_key = CryptoHelpers::rsa_encrypt_key(target_pub_key, session_key);
+        std::string enc_session_key = CryptoHelpers::rsa_encrypt_key(target_pub_key.value(), session_key);
 
         std::string my_priv_key = identity_manager_->get_my_private_key();
         std::string signature = CryptoHelpers::sign_message(my_priv_key, enc_payload);
@@ -43,9 +43,9 @@ bool PacketSecurity::secure_packet(mesh::RoutedPacket &pkt, const std::string &t
 std::expected<std::string, std::string> PacketSecurity::decrypt_packet(const mesh::RoutedPacket &pkt) {
     const std::string &sender_id = pkt.from_peer_id();
 
-    std::string sender_pub_key = identity_manager_->get_public_key(sender_id);
+    std::optional<std::string> sender_pub_key = identity_manager_->get_public_key(sender_id);
 
-    if (sender_pub_key.empty()) {
+    if (!sender_pub_key.has_value() || sender_pub_key.value().empty()) {
         const std::string &err = "sender identity unknown.";
         Log::warn("PacketSecurity", {{"sender", sender_id}}, err);
         return std::unexpected(err);
@@ -53,7 +53,7 @@ std::expected<std::string, std::string> PacketSecurity::decrypt_packet(const mes
 
     try {
         bool valid_sig = CryptoHelpers::verify_signature(
-            sender_pub_key,
+            sender_pub_key.value(),
             pkt.encrypted_payload(),
             pkt.signature()
         );
