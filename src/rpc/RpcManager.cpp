@@ -6,6 +6,7 @@
 #include <boost/proto/transform/env.hpp>
 
 #include "EnvelopeUtils.h"
+#include "heartbeat.pb.h"
 #include "Logger.h"
 #include "MessageUtils.h"
 #include "handlers/HandshakeHandler.h"
@@ -264,7 +265,7 @@ void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
 
     // dummy packet meant for UDP keepalives and UDP hole punching
     mesh::RoutedPacket udp_keepalive_pkt = mesh::packet::MakeBinaryRoutedPacket(
-        peer_id_, "", 1, "heartbeat", mesh::UDP
+        peer_id_, "", 1, mesh::Heartbeat::descriptor()->full_name(), mesh::UDP
     );
 
     while (true) {

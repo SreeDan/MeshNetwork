@@ -86,11 +86,17 @@ public:
     //  - from: the ID of the sender
     //  - msg: the parsed proto object
     //  - reply: a function to send a response back (optional)
-    template<typename RequestT, typename ResponseT>
+    template<typename RequestT, typename ResponseT, typename HandlerT>
         requires std::derived_from<RequestT, google::protobuf::Message> &&
-                 std::derived_from<ResponseT, google::protobuf::Message>
-    void on(std::function<void(const std::string &from, const RequestT &msg,
-                               std::function<void(std::string &)> reply)> handler);
+                 std::derived_from<ResponseT, google::protobuf::Message> &&
+                 std::invocable<HandlerT, const std::string &, const RequestT &, std::function<void
+                     (const std::string &)> >
+    void on(HandlerT &&handler);
+
+    template<typename RequestT, typename HandlerT>
+        requires std::derived_from<RequestT, google::protobuf::Message> &&
+                 std::invocable<HandlerT, const std::string &, const RequestT &>
+    void on(HandlerT &&handler);
 
     bool ping(const std::string &peer);
 
@@ -125,12 +131,12 @@ private:
 
     using PacketHandler = std::function<void(const std::string &from,
                                              const std::string &raw_bytes,
-                                             std::function<void(std::string &)> reply_cb
+                                             std::function<void(const std::string &)> reply_cb
         )
     >;
 
     struct HandlerInfo {
-        std::string ResponseSubtype;
+        std::optional<std::string> ResponseSubtype;
         PacketHandler handler;
     };
 
@@ -334,17 +340,18 @@ std::future<std::vector<std::pair<std::string, ResponseT> > > MeshNode::broadcas
     return prom->get_future();
 }
 
-template<typename RequestT, typename ResponseT>
+template<typename RequestT, typename ResponseT, typename HandlerT>
     requires std::derived_from<RequestT, google::protobuf::Message> &&
-             std::derived_from<ResponseT, google::protobuf::Message>
-void MeshNode::on(std::function<void(const std::string &from, const RequestT &msg,
-                                     std::function<void(std::string &)> reply)> handler) {
+             std::derived_from<ResponseT, google::protobuf::Message> &&
+             std::invocable<HandlerT, const std::string &, const RequestT &, std::function<void(const std::string &)> >
+void MeshNode::on(HandlerT &&handler) {
     std::string subtype = RequestT::descriptor()->full_name();
     Log::debug("mesh_node.on", {"subtype", subtype}, "registering subtype");
 
     handlers_[subtype] = {
         ResponseT::descriptor()->full_name(),
-        [handler](const std::string &from, const std::string &raw_bytes, auto reply_cb) {
+        [handler = std::forward<HandlerT>(handler)](const std::string &from, const std::string &raw_bytes,
+                                                    auto reply_cb) {
             if (RequestT msg; msg.ParseFromString(raw_bytes)) {
                 handler(from, msg, std::move(reply_cb));
             } else {
@@ -354,4 +361,26 @@ void MeshNode::on(std::function<void(const std::string &from, const RequestT &ms
         }
     };
 }
+
+template<typename RequestT, typename HandlerT>
+    requires std::derived_from<RequestT, google::protobuf::Message> &&
+             std::invocable<HandlerT, const std::string &, const RequestT &>
+void MeshNode::on(HandlerT &&handler) {
+    std::string subtype = RequestT::descriptor()->full_name();
+    Log::debug("mesh_node.on", {"subtype", subtype}, "registering subtype");
+
+    handlers_[subtype] = {
+        std::nullopt,
+        [handler = std::forward<HandlerT>(handler)](const std::string &from, const std::string &raw_bytes, auto
+                                                    /*reply_cb*/) {
+            if (RequestT msg; msg.ParseFromString(raw_bytes)) {
+                handler(from, msg);
+            } else {
+                Log::error("mesh_node.on", {"subtype", RequestT::descriptor()->full_name()},
+                           "failed to parse protobuf subtype message");
+            }
+        }
+    };
+}
+
 

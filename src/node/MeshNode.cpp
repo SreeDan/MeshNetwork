@@ -8,6 +8,7 @@
 #include "crypto.pb.h"
 #include "EnvelopeUtils.h"
 #include "GraphManager.h"
+#include "heartbeat.pb.h"
 #include "Logger.h"
 #include "ping.pb.h"
 
@@ -58,8 +59,7 @@ void MeshNode::setup_builtin_handlers() {
                 resp.add_directly_connected_peers(neighbor_peer_id);
             }
 
-            std::string bytes = resp.SerializeAsString();
-            reply(bytes);
+            reply(resp.SerializeAsString());
         }
     );
 
@@ -67,9 +67,8 @@ void MeshNode::setup_builtin_handlers() {
         [this](const std::string &from, const mesh::PingRequest &req, auto reply) {
             mesh::PingResponse resp;
             resp.set_message("hello from" + peer_id_);
-            std::string bytes = resp.SerializeAsString();
             Log::info("ping", {{"peer_id", from}, {"message", req.message()}}, "ping received");
-            reply(bytes);
+            reply(resp.SerializeAsString());
         }
     );
 
@@ -87,10 +86,14 @@ void MeshNode::setup_builtin_handlers() {
 
             mesh::IdentityResponse resp;
             resp.set_certificate_pem(identity_->get_my_cert());
-            std::string bytes = resp.SerializeAsString();
-            reply(bytes);
+            reply(resp.SerializeAsString());
         }
     );
+
+
+    on<mesh::Heartbeat>([](const std::string &, const mesh::Heartbeat &) {
+        // no-op
+    });
 }
 
 
@@ -213,19 +216,31 @@ void MeshNode::handle_incoming_packet(mesh::RoutedPacket &pkt) {
         auto it = handlers_.find(pkt.subtype());
         if (it != handlers_.end()) {
             const std::string &from = pkt.from_peer_id();
-            auto reply_cb = [this, from, pkt = pkt, subtype = it->second.ResponseSubtype]
-            (std::string &response_payload) {
-                if (!pkt.expect_response()) return;
+            const std::string &req_id = pkt.id();
+
+            // Don't copy whole packet because the binary data is probably a lot
+            auto reply_cb = [this, from, req_id, req_transport = pkt.transport(), expect_resp = pkt.expect_response(),
+                        subtype_opt = it->second.ResponseSubtype]
+            (const std::string &response_payload) {
+                if (!expect_resp) return;
+
+                std::string subtype = "";
+                if (subtype_opt.has_value()) {
+                    subtype = subtype_opt.value();
+                }
 
                 // Create the Response Packet matching the original ID
                 auto resp = mesh::packet::MakeBinaryRoutedPacket(
-                    peer_id_, from, 15, subtype, pkt.transport(),
+                    peer_id_, from, 15, subtype, req_transport,
                     response_payload,
                     false
                 );
-                resp.set_id(pkt.id());
+                resp.set_id(req_id);
 
-                bool is_identity_exchange = (pkt.subtype() == this->identity_request_subtype);
+                bool is_identity_exchange = (
+                    subtype == this->identity_request_subtype ||
+                    subtype == this->identity_response_subtype
+                );
 
                 if (this->encrypt_messages_ && !is_identity_exchange) {
                     if (!this->security_->secure_packet(resp, from, response_payload)) {
