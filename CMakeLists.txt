@@ -9,17 +9,28 @@ project(MeshNetworking)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-find_package(Protobuf CONFIG REQUIRED)
 set(CMAKE_FIND_PACKAGE_PREFER_CONFIG TRUE)
-find_package(Boost CONFIG REQUIRED COMPONENTS filesystem system graph headers)
-find_package(spdlog CONFIG REQUIRED)
-find_package(nlohmann_json CONFIG REQUIRED)
-find_package(yaml-cpp CONFIG REQUIRED)
 
-find_package(OpenSSL MODULE REQUIRED)
+macro(safe_find_package PKG_NAME)
+    if (NOT TARGET ${PKG_NAME}::${PKG_NAME} AND NOT ${PKG_NAME}_FOUND)
+        find_package(${PKG_NAME} ${ARGN})
+    endif ()
+endmacro()
 
-file(GLOB PROTO_FILES "${CMAKE_SOURCE_DIR}/proto/*.proto")
+safe_find_package(Protobuf CONFIG REQUIRED)
+safe_find_package(spdlog CONFIG REQUIRED)
+safe_find_package(nlohmann_json CONFIG REQUIRED)
+safe_find_package(yaml-cpp CONFIG REQUIRED)
+
+if (NOT TARGET OpenSSL::SSL)
+    find_package(OpenSSL MODULE REQUIRED)
+endif ()
+
+if (NOT TARGET Boost::headers)
+    find_package(Boost CONFIG REQUIRED COMPONENTS filesystem system graph headers)
+endif ()
+
+file(GLOB PROTO_FILES "${CMAKE_CURRENT_SOURCE_DIR}/proto/*.proto")
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
 
 add_library(mesh_core
@@ -47,6 +58,9 @@ add_library(mesh_core
         ${PROTO_HDRS}
 )
 
+add_custom_target(mesh_protos DEPENDS ${PROTO_SRCS} ${PROTO_HDRS})
+add_dependencies(mesh_core mesh_protos)
+
 target_link_libraries(mesh_core PUBLIC
         Boost::filesystem
         Boost::system
@@ -60,23 +74,27 @@ target_link_libraries(mesh_core PUBLIC
         yaml-cpp::yaml-cpp
 )
 
-target_include_directories(mesh_core PUBLIC
+target_include_directories(mesh_core
+        PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}
-        ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/graph
-        ${CMAKE_SOURCE_DIR}/src/net
-        ${CMAKE_SOURCE_DIR}/src/net/udp
-        ${CMAKE_SOURCE_DIR}/src/node
-        ${CMAKE_SOURCE_DIR}/src/proto_types
-        ${CMAKE_SOURCE_DIR}/src/routing
-        ${CMAKE_SOURCE_DIR}/src/rpc
-        ${CMAKE_SOURCE_DIR}/src/utils
-        ${CMAKE_SOURCE_DIR}/src/logging
-        ${CMAKE_SOURCE_DIR}/src/crypto
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/graph
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/net
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/net/udp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/node
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/proto_types
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/routing
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/rpc
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/logging
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/crypto
 )
 
-add_executable(MeshNetworking main.cpp)
-target_link_libraries(MeshNetworking PRIVATE mesh_core)
+if (CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    add_executable(MeshNetworking main.cpp)
+    target_link_libraries(MeshNetworking PRIVATE mesh_core)
 
-enable_testing()
-add_subdirectory(tests)
+    enable_testing()
+    add_subdirectory(tests)
+endif ()
