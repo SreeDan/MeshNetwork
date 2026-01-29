@@ -21,9 +21,13 @@ message RoutedPacket {
   string subtype = 6; // subtype of message (e.g. "myapp.Message1")
   bool expect_response = 7;
 
+  bytes signature = 8;             // signed by Source
+  bytes encrypted_session_key = 9; // RSA Encrypted (for the dest)
+
   oneof payload_variant {
     string text = 10;
     RouteTable route_table = 11;
     bytes binary_data = 12;
+    bytes encrypted_payload = 13; // AES Encrypted
   }
 }

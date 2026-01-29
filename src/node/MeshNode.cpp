@@ -4,6 +4,7 @@
 #include <iostream>
 #include <utility>
 
+#include "crypto.pb.h"
 #include "EnvelopeUtils.h"
 #include "GraphManager.h"
 #include "Logger.h"
@@ -14,7 +15,9 @@ MeshNode::MeshNode(
     const int tcp_port,
     const int udp_port,
     const std::string &peer_id,
-    std::shared_ptr<boost::asio::ssl::context> ssl_ctx)
+    std::shared_ptr<boost::asio::ssl::context> ssl_ctx,
+    std::shared_ptr<IdentityManager> identity_manager_,
+    bool encrypt_messages)
     : ioc_(ioc),
       tcp_port_(tcp_port),
       udp_port_(udp_port),
@@ -22,7 +25,11 @@ MeshNode::MeshNode(
       ssl_ctx_(std::move(ssl_ctx)),
       rpc_connections(std::make_shared<RpcManager>(ioc, peer_id, tcp_port)),
       router_(std::make_shared<MeshRouter>(ioc, peer_id)),
-      request_tracker_(ioc) {
+      identity_(std::move(identity_manager_)),
+      request_tracker_(ioc),
+      encrypt_messages_(encrypt_messages),
+      identity_request_subtype(mesh::IdentityRequest::descriptor()->full_name()),
+      identity_response_subtype(mesh::IdentityResponse::descriptor()->full_name()) {
     rpc_connections->set_sink(router_);
     router_->set_transport(rpc_connections);
     router_->set_on_packet_for_me(
@@ -57,8 +64,19 @@ void MeshNode::setup_builtin_handlers() {
     on<mesh::PingRequest>(
         [this](const std::string &from, const mesh::PingRequest &req, auto reply) {
             mesh::PingResponse resp;
+            resp.set_message("hello from" + peer_id_);
             std::string bytes = resp.SerializeAsString();
-            Log::info("ping", {{"peer_id", from}}, "ping received");
+            Log::info("ping", {{"peer_id", from}, {"message", req.message()}}, "ping received");
+            reply(bytes);
+        }
+    );
+
+    on<mesh::IdentityRequest>(
+        [this](const std::string &from, const mesh::IdentityRequest &req, auto reply) {
+            mesh::IdentityResponse resp;
+            resp.set_certificate_pem(identity_->get_my_cert());
+            std::string bytes = resp.SerializeAsString();
+            Log::info("identity", {{"peer_id", from}}, "received request");
             reply(bytes);
         }
     );
@@ -94,14 +112,21 @@ void MeshNode::send_text(const std::string &remote_id, const std::string &text) 
 
 bool MeshNode::ping(const std::string &peer) {
     mesh::PingRequest req;
+    req.set_message("hello from " + peer_id_);
 
-    auto future = send_request<mesh::PingResponse>(peer, req);
+    auto future = send_request<mesh::PingRequest, mesh::PingResponse>(peer, req);
 
-    std::pair<std::string, mesh::PingResponse> resp;
+    std::expected<std::pair<std::string, mesh::PingResponse>, RequestError> resp;
     try {
         resp = future.get();
-        Log::info("ping", {{"peer_id", resp.first}}, "pong received");
-        return true;
+        if (resp.has_value()) {
+            Log::info("ping", {{"peer_id", resp.value().first}, {"message", resp.value().second.message()}},
+                      "pong received");
+            return true;
+        }
+
+        Log::error("ping", {{"err", resp.error()}}, "ping request failed");
+        return false;
     } catch (const std::exception &e) {
         Log::error("ping", {{"err", e.what()}}, "ping request failed");
         return false;
@@ -116,10 +141,53 @@ void MeshNode::set_block_all_messages(bool block) {
     ignore_all_incoming_messages_ = block;
 }
 
+bool MeshNode::should_send_identity_request(const std::string &peer_id) {
+    auto now = std::chrono::steady_clock::now();
+
+    auto it = id_request_cooldowns_.find(peer_id);
+    if (it != id_request_cooldowns_.end()) {
+        auto last_request_time = it->second;
+        auto time_since = std::chrono::duration_cast<std::chrono::seconds>(now - last_request_time);
+
+        // If we asked less than 5 seconds ago, block the request
+        if (time_since.count() < 5) {
+            return false;
+        }
+    }
+
+    id_request_cooldowns_[peer_id] = now;
+    return true;
+}
+
+void MeshNode::maybe_decrypt_packet(const mesh::RoutedPacket &pkt) {
+}
+
 void MeshNode::handle_incoming_packet(const mesh::RoutedPacket &pkt) {
     if (ignore_all_incoming_messages_) return;
 
-    // TODO: handle decryption
+    if (pkt.has_encrypted_payload()) {
+        const std::string &from = pkt.from_peer_id();
+        if (!identity_->has_key(from)) {
+            Log::debug("handle_incoming_packet",
+                       {{"from", from}},
+                       "buffering packet, don't have public key to decrypt");
+            identity_->buffer_incoming_packet(from, pkt);
+
+            if (should_send_identity_request(from)) {
+                Log::info("MeshNode", {{"target", from}}, "Unknown Identity. Sending Request.");
+                send_identity_request(from);
+            }
+            return;
+        }
+
+        auto expected_plaintext = security_->decrypt_packet(pkt);
+        if (!expected_plaintext.has_value()) {
+            Log::warn("handle_incoming_packet",
+                      {{"from", pkt.from_peer_id()}, {"err", expected_plaintext.error()}},
+                      "failed to decrypt packet");
+        }
+        return;
+    }
 
     std::string pkt_id = to_hex(pkt.id());
     // If this was a reply. We should set the future and not send another request.
@@ -166,7 +234,7 @@ void MeshNode::set_output_directory(const std::string &dir) {
 void MeshNode::generate_topology_graph(const std::string &filename) {
     mesh::TopologyRequest req;
 
-    auto future = broadcast_request<mesh::TopologyResponse>(req);
+    auto future = broadcast_request<mesh::TopologyRequest, mesh::TopologyResponse>(req);
 
     std::vector<std::pair<std::string, mesh::TopologyResponse> > broadcast_responses;
     try {
@@ -197,4 +265,38 @@ void MeshNode::add_auto_connection(const std::string &ip_address, int port) {
 void MeshNode::remove_auto_connection(const std::string &ip_address, int port) {
     auto peer_ip = mesh::envelope::MakePeerIP(ip_address, port);
     rpc_connections->remove_auto_connection(peer_ip);
+}
+
+
+void MeshNode::send_identity_request(const std::string &dest) {
+    mesh::IdentityRequest req;
+    send_request_async<mesh::IdentityRequest, mesh::IdentityResponse>(
+        dest,
+        req,
+        [this, dest](const std::string &peer, std::expected<mesh::IdentityResponse, RequestError> resp) {
+            if (!resp || !resp.has_value()) {
+                Log::warn("identity_request", {{"from", peer}}, "identity request timed out");
+                return;
+            }
+
+            const auto &unwrapped_resp = resp.value();
+            this->identity_->add_trusted_peer(unwrapped_resp.peer_id(), unwrapped_resp.certificate_pem());
+            handle_pending_incoming_packets(peer);
+            handle_pending_outgoing_packets(peer);
+        }
+    );
+}
+
+void MeshNode::handle_pending_incoming_packets(const std::string &src) {
+    std::vector<mesh::RoutedPacket> packets = identity_->pop_incoming_pending_packets(src);
+    for (auto &pkt: packets) {
+        handle_incoming_packet(pkt);
+    }
+}
+
+void MeshNode::handle_pending_outgoing_packets(const std::string &dest) {
+    std::vector<mesh::RoutedPacket> packets = identity_->pop_outgoing_pending_packets(dest);
+    for (auto &pkt: packets) {
+        router_->send_packet(pkt);
+    }
 }

@@ -82,16 +82,21 @@ int main(int argc, char **argv) {
 
     bool use_tls = false;
     std::string cert, key, ca;
+    bool encrypt_messages = false;
     if (config["tls"] && config["tls"]["cert-path"] && config["tls"]["key-path"] && config["tls"]["ca-path"]) {
         use_tls = true;
         cert = config["tls"]["cert-path"].as<std::string>();
         key = config["tls"]["key-path"].as<std::string>();
         ca = config["tls"]["ca-path"].as<std::string>();
+
+        // encryption relies on the three pems above to be present
+        if (config["tls"] && config["tls"]["encrypt-messages"]) {
+            encrypt_messages = true;
+        }
     }
 
-    boost::asio::io_context ioc;
-
     std::shared_ptr<boost::asio::ssl::context> ssl_ctx = nullptr;
+    std::shared_ptr<IdentityManager> identity_manager = std::make_shared<IdentityManager>();
     if (use_tls) {
         try {
             ssl_ctx = make_ssl_context(cert, key, ca);
@@ -101,7 +106,12 @@ int main(int argc, char **argv) {
         }
     }
 
-    MeshNode node(ioc, tcp_port, udp_port, peer_id, ssl_ctx);
+    if (encrypt_messages) {
+        identity_manager->load_identities(cert, key, ca);
+    }
+
+    boost::asio::io_context ioc;
+    MeshNode node(ioc, tcp_port, udp_port, peer_id, ssl_ctx, identity_manager, encrypt_messages);
 
     node.set_output_directory(output_dir);
 

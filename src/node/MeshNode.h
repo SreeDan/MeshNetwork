@@ -1,15 +1,26 @@
 #pragma once
 #include <string>
 #include <boost/asio.hpp>
+#include <vector>
+#include <future>
+#include <chrono>
+#include <expected>
 
 #include "AsyncRequestTracker.h"
 #include "Logger.h"
 #include "MeshRouter.h"
+#include "PacketSecurity.h"
 #include "RoutedPacketUtils.h"
 #include "RpcManager.h"
 #include "StringUtils.h"
 #include "topology.pb.h"
 
+
+enum class RequestError {
+    RequestTimeout,
+    EncryptionError,
+    MalformedResponse,
+};
 
 class MeshNode {
 public:
@@ -18,7 +29,9 @@ public:
         int tcp_port,
         int udp_port,
         const std::string &peer_id,
-        std::shared_ptr<boost::asio::ssl::context> ssl_ctx);
+        std::shared_ptr<boost::asio::ssl::context> ssl_ctx,
+        std::shared_ptr<IdentityManager> identity_manager_,
+        bool encrypt_messages);
 
     void start();
 
@@ -40,16 +53,26 @@ public:
         requires std::derived_from<T, google::protobuf::Message>
     void broadcast_message(const T &msg);
 
-    template<typename ResponseT, typename RequestT>
+    template<typename RequestT, typename ResponseT>
         requires std::derived_from<ResponseT, google::protobuf::Message> &&
                  std::derived_from<RequestT, google::protobuf::Message>
-    std::future<std::pair<std::string, ResponseT> > send_request(
+    void send_request_async(
+        const std::string &dest_id,
+        const RequestT &req,
+        std::function<void(const std::string &, std::expected<ResponseT, RequestError>)> callback,
+        std::chrono::milliseconds timeout = std::chrono::seconds(5)
+    );
+
+    template<typename RequestT, typename ResponseT>
+        requires std::derived_from<ResponseT, google::protobuf::Message> &&
+                 std::derived_from<RequestT, google::protobuf::Message>
+    std::future<std::expected<std::pair<std::string, ResponseT>, RequestError> > send_request(
         const std::string &dest_id, const RequestT &req,
         std::chrono::milliseconds timeout = std::chrono::seconds(5)
     );
 
 
-    template<typename ResponseT, typename RequestT>
+    template<typename RequestT, typename ResponseT>
     std::future<std::vector<std::pair<std::string, ResponseT> > > broadcast_request(
         const RequestT &req,
         std::chrono::milliseconds timeout = std::chrono::seconds(5)
@@ -81,15 +104,20 @@ private:
     int udp_port_;
     std::string peer_id_;
     std::shared_ptr<boost::asio::ssl::context> ssl_ctx_;
+    bool encrypt_messages_;
+    std::string identity_request_subtype;
+    std::string identity_response_subtype;
     std::string output_directory_;
     bool ignore_all_incoming_messages_ = false;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> id_request_cooldowns_;
 
     // Stack components
     std::shared_ptr<RpcManager> rpc_connections; // Transport
     std::shared_ptr<MeshRouter> router_; // Routing
-    // std::shared_ptr<IdentityManager> identity_; // Peer identity and certificate management
-    // std::unique_ptr<PacketSecurity> security_; // Packet encryption
+    std::shared_ptr<IdentityManager> identity_; // Peer identity and certificate management
+    std::unique_ptr<PacketSecurity> security_; // Packet encryption
     AsyncRequestTracker<std::string> request_tracker_; // Manage request lifecycle
+
 
     using PacketHandler = std::function<void(const std::string &from,
                                              const std::string &raw_bytes,
@@ -102,74 +130,169 @@ private:
 
     void setup_builtin_handlers();
 
-    // void dispatch_message(const std::string &from, const mesh::RoutedPacket &pkt);
-    //
-    // void do_accept();
+    bool should_send_identity_request(const std::string &peer_id);
+
+    void maybe_decrypt_packet(const mesh::RoutedPacket &pkt);
+
+    void send_identity_request(const std::string &dest);
+
+    void handle_pending_outgoing_packets(const std::string &dest);
+
+    void handle_pending_incoming_packets(const std::string &src);
 };
 
 
 template<typename T>
     requires std::derived_from<T, google::protobuf::Message>
 void MeshNode::send_message(const std::string &dest_id, const T &msg) {
-    auto pkt = mesh::packet::MakeBinaryRoutedPacket(
-        peer_id_, dest_id, MeshRouter::DEFAULT_TTL,
-        T::descriptor()->full_name(),
-        msg.SerializeAsString(),
-        false
-    );
+    mesh::RoutedPacket pkt;
+    std::string subtype = T::descriptor()->full_name();
+    if (encrypt_messages_ && subtype != identity_request_subtype) {
+        pkt = mesh::packet::MakeBinaryRoutedPacket(
+            peer_id_, dest_id, MeshRouter::DEFAULT_TTL,
+            subtype
+        );
+
+        if (!identity_->has_key(dest_id)) {
+            Log::warn(
+                "send_request_async",
+                {{"dest_id", dest_id}},
+                "missing dest_id public key, postponing send");
+            identity_->buffer_outgoing_packet(dest_id, pkt);
+
+            if (should_send_identity_request(dest_id)) {
+                send_identity_request(dest_id);
+            }
+            return;
+        }
+
+        if (!security_->secure_packet(pkt, dest_id, msg.SerializeAsString())) {
+            return;
+        }
+    } else {
+        pkt = mesh::packet::MakeBinaryRoutedPacket(
+            peer_id_, dest_id, MeshRouter::DEFAULT_TTL,
+            subtype,
+            msg.SerializeAsString()
+        );
+    }
     router_->send_packet(pkt);
 }
 
 template<typename T>
     requires std::derived_from<T, google::protobuf::Message>
 void MeshNode::broadcast_message(const T &msg) {
-    auto pkt = mesh::packet::MakeBinaryRoutedPacket(
+    mesh::RoutedPacket pkt = mesh::packet::MakeBinaryRoutedPacket(
         peer_id_, "", MeshRouter::DEFAULT_TTL,
         T::descriptor()->full_name(),
-        msg.SerializeAsString(),
-        false
+        msg.SerializeAsString()
     );
     router_->send_packet(pkt);
 }
 
-template<typename ResponseT, typename RequestT>
+
+template<typename RequestT, typename ResponseT>
     requires std::derived_from<ResponseT, google::protobuf::Message> &&
              std::derived_from<RequestT, google::protobuf::Message>
-std::future<std::pair<std::string, ResponseT> > MeshNode::send_request(
-    const std::string &dest_id, const RequestT &req,
+void MeshNode::send_request_async(
+    const std::string &dest_id,
+    const RequestT &req,
+    std::function<void(const std::string &, std::expected<ResponseT, RequestError>)> callback,
     std::chrono::milliseconds timeout) {
-    auto pkt = mesh::packet::MakeBinaryRoutedPacket(
-        peer_id_, dest_id, MeshRouter::DEFAULT_TTL,
-        RequestT::descriptor()->full_name(),
-        req.SerializeAsString(),
-        true
-    );
-
-    std::string req_id = to_hex(pkt.id());
-    auto future = request_tracker_.track_request(req_id, std::chrono::seconds(5));
-
-    router_->send_packet(pkt);
-
-    return std::async(std::launch::deferred, [dest_id, raw_fut = std::move(future)]() mutable {
-        std::string bytes = raw_fut.get();
-        ResponseT resp;
-        if (!resp.ParseFromString(bytes)) {
-            throw std::runtime_error("Failed to parse response type");
+    auto internal_cb = [callback = std::move(callback)
+            ](const std::string &sender, std::optional<std::string> maybe_raw_bytes) {
+        if (!maybe_raw_bytes.has_value()) {
+            callback(sender, std::unexpected(RequestError::RequestTimeout));
+            return;
         }
 
-        return std::make_pair(dest_id, resp);
-    });
+        const std::string &raw_bytes = maybe_raw_bytes.value();
+        ResponseT resp;
+        if (resp.ParseFromString(raw_bytes)) {
+            callback(sender, resp);
+        } else {
+            Log::error("send_request_async", {{"from", sender}}, "failed to parse response");
+            callback(sender, std::unexpected(RequestError::MalformedResponse));
+        }
+    };
+
+    mesh::RoutedPacket pkt;
+    std::string subtype = RequestT::descriptor()->full_name();
+    if (encrypt_messages_ && subtype != identity_request_subtype) {
+        pkt = mesh::packet::MakeBinaryRoutedPacket(
+            peer_id_, dest_id, MeshRouter::DEFAULT_TTL,
+            subtype,
+            "",
+            true
+        );
+        std::string req_id = to_hex(pkt.id());
+
+        if (!identity_->has_key(dest_id)) {
+            Log::warn(
+                "send_request_async",
+                {{"dest_id", dest_id}},
+                "missing dest_id public key, postponing send");
+            request_tracker_.track_request_callback(req_id, timeout, internal_cb);
+            identity_->buffer_outgoing_packet(dest_id, pkt);
+
+            if (should_send_identity_request(dest_id)) {
+                send_identity_request(dest_id);
+            }
+
+            return;
+        }
+
+        if (!security_->secure_packet(pkt, dest_id, req.SerializeAsString())) {
+            Log::error("send_request_async", {{"dest_id", dest_id}}, "encryption failed");
+            callback(dest_id, std::unexpected(RequestError::EncryptionError));
+            return;
+        }
+    } else {
+        pkt = mesh::packet::MakeBinaryRoutedPacket(
+            peer_id_, dest_id, MeshRouter::DEFAULT_TTL,
+            subtype,
+            req.SerializeAsString(),
+            true
+        );
+    }
+
+    std::string req_id = to_hex(pkt.id());
+    request_tracker_.track_request_callback(req_id, timeout, internal_cb);
+    router_->send_packet(pkt);;
+}
+
+template<typename RequestT, typename ResponseT>
+    requires std::derived_from<ResponseT, google::protobuf::Message> &&
+             std::derived_from<RequestT, google::protobuf::Message>
+std::future<std::expected<std::pair<std::string, ResponseT>, RequestError> > MeshNode::send_request(
+    const std::string &dest_id, const RequestT &req,
+    std::chrono::milliseconds timeout) {
+    auto prom = std::make_shared<std::promise<std::expected<std::pair<std::string, ResponseT>, RequestError> > >();
+
+    send_request_async<RequestT, ResponseT>(
+        dest_id, req,
+        [prom](const std::string &peer, std::expected<ResponseT, RequestError> resp) {
+            if (resp.has_value()) {
+                prom->set_value(std::make_pair(peer, *resp));
+            } else {
+                prom->set_value(std::unexpected(resp.error()));
+            }
+        },
+        timeout
+    );
+
+    return prom->get_future();
 }
 
 
-template<typename ResponseT, typename RequestT>
+template<typename RequestT, typename ResponseT>
 std::future<std::vector<std::pair<std::string, ResponseT> > > MeshNode::broadcast_request(
     const RequestT &req,
     std::chrono::milliseconds timeout) {
     // Shared state to collect responses
     auto results = std::make_shared<std::vector<std::pair<std::string, ResponseT> > >();
     auto prom = std::make_shared<std::promise<std::vector<std::pair<std::string, ResponseT> > > >();
-    auto pkt = mesh::packet::MakeBinaryRoutedPacket(
+    mesh::RoutedPacket pkt = mesh::packet::MakeBinaryRoutedPacket(
         peer_id_, "", 15, // Empty dest_id = Broadcast
         RequestT::descriptor()->full_name(),
         req.SerializeAsString(),
