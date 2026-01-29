@@ -23,18 +23,15 @@ safe_find_package(Protobuf CONFIG REQUIRED)
 safe_find_package(spdlog CONFIG REQUIRED)
 safe_find_package(nlohmann_json CONFIG REQUIRED)
 safe_find_package(yaml-cpp CONFIG REQUIRED)
+find_package(OpenSSL MODULE REQUIRED)
 
-if (NOT TARGET OpenSSL::SSL)
-    find_package(OpenSSL REQUIRED)
+if (NOT TARGET Boost::headers)
+    find_package(Boost CONFIG REQUIRED COMPONENTS filesystem system graph headers)
 endif ()
 
 if (TARGET openssl::ssl AND NOT TARGET OpenSSL::SSL)
     add_library(OpenSSL::SSL ALIAS openssl::ssl)
     add_library(OpenSSL::Crypto ALIAS openssl::crypto)
-endif ()
-
-if (NOT TARGET Boost::headers)
-    find_package(Boost CONFIG REQUIRED COMPONENTS filesystem system graph headers)
 endif ()
 
 file(GLOB PROTO_FILES "${CMAKE_CURRENT_SOURCE_DIR}/proto/*.proto")
