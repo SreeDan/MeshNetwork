@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.25)
 
-if (DEFINED CMAKE_TOOLCHAIN_FILE)
-    set(VCPKG_TARGET_TRIPLET "x64-linux-cpp23" CACHE STRING "" FORCE)
-    set(VCPKG_OVERLAY_TRIPLETS "${CMAKE_CURRENT_SOURCE_DIR}/triplets" CACHE STRING "" FORCE)
+if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    if (DEFINED CMAKE_TOOLCHAIN_FILE)
+        set(VCPKG_TARGET_TRIPLET "x64-linux-cpp23" CACHE STRING "" FORCE)
+        set(VCPKG_OVERLAY_TRIPLETS "${CMAKE_CURRENT_SOURCE_DIR}/triplets" CACHE STRING "" FORCE)
+    endif ()
 endif ()
 
 project(MeshNetworking)
@@ -23,7 +25,12 @@ safe_find_package(nlohmann_json CONFIG REQUIRED)
 safe_find_package(yaml-cpp CONFIG REQUIRED)
 
 if (NOT TARGET OpenSSL::SSL)
-    find_package(OpenSSL MODULE REQUIRED)
+    find_package(OpenSSL REQUIRED)
+endif ()
+
+if (TARGET openssl::ssl AND NOT TARGET OpenSSL::SSL)
+    add_library(OpenSSL::SSL ALIAS openssl::ssl)
+    add_library(OpenSSL::Crypto ALIAS openssl::crypto)
 endif ()
 
 if (NOT TARGET Boost::headers)
@@ -77,6 +84,7 @@ target_link_libraries(mesh_core PUBLIC
 target_include_directories(mesh_core
         PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
         PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/src/graph
