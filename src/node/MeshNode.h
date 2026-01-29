@@ -92,6 +92,10 @@ public:
     void on(std::function<void(const std::string &from, const RequestT &msg,
                                std::function<void(std::string &)> reply)> handler);
 
+    template<typename RequestT>
+        requires std::derived_from<RequestT, google::protobuf::Message>
+    void on(std::function<void(const std::string &from, const RequestT &msg)>);
+
     bool ping(const std::string &peer);
 
     std::vector<std::string> get_nodes_in_network();
@@ -130,7 +134,7 @@ private:
     >;
 
     struct HandlerInfo {
-        std::string ResponseSubtype;
+        std::optional<std::string> ResponseSubtype;
         PacketHandler handler;
     };
 
@@ -344,6 +348,25 @@ void MeshNode::on(std::function<void(const std::string &from, const RequestT &ms
 
     handlers_[subtype] = {
         ResponseT::descriptor()->full_name(),
+        [handler](const std::string &from, const std::string &raw_bytes, auto reply_cb) {
+            if (RequestT msg; msg.ParseFromString(raw_bytes)) {
+                handler(from, msg, std::move(reply_cb));
+            } else {
+                Log::error("mesh_node.on", {"subtype", RequestT::descriptor()->full_name()},
+                           "failed to parse protobuf subtype message");
+            }
+        }
+    };
+}
+
+template<typename RequestT>
+    requires std::derived_from<RequestT, google::protobuf::Message>
+void MeshNode::on(std::function<void(const std::string &from, const RequestT &msg)> handler) {
+    std::string subtype = RequestT::descriptor()->full_name();
+    Log::debug("mesh_node.on", {"subtype", subtype}, "registering subtype");
+
+    handlers_[subtype] = {
+        std::nullopt,
         [handler](const std::string &from, const std::string &raw_bytes, auto reply_cb) {
             if (RequestT msg; msg.ParseFromString(raw_bytes)) {
                 handler(from, msg, std::move(reply_cb));

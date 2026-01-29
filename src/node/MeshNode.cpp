@@ -213,9 +213,14 @@ void MeshNode::handle_incoming_packet(mesh::RoutedPacket &pkt) {
         auto it = handlers_.find(pkt.subtype());
         if (it != handlers_.end()) {
             const std::string &from = pkt.from_peer_id();
-            auto reply_cb = [this, from, pkt = pkt, subtype = it->second.ResponseSubtype]
+            auto reply_cb = [this, from, pkt = pkt, subtype_opt = it->second.ResponseSubtype]
             (std::string &response_payload) {
                 if (!pkt.expect_response()) return;
+
+                std::string subtype = "";
+                if (subtype_opt.has_value()) {
+                    subtype = subtype_opt.value();
+                }
 
                 // Create the Response Packet matching the original ID
                 auto resp = mesh::packet::MakeBinaryRoutedPacket(
