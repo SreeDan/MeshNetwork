@@ -75,8 +75,13 @@ public:
     }
 
     bool fulfill_request(const std::string &req_id, const std::string &from_id, T payload) {
-        if (complete_request(req_id, from_id, std::move(payload))) {
-            return true;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            if (pending_requests_.contains(req_id)) {
+                // It is a pending request, safe to move payload now
+                // We unlock here to avoid deadlocking if the callback calls back into tracker
+                return complete_request(req_id, from_id, std::move(payload));
+            }
         }
 
         // Handle if its a broadcast
