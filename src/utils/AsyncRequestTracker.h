@@ -77,22 +77,18 @@ public:
     bool fulfill_request(const std::string &req_id, const std::string &from_id, T payload) {
         {
             std::lock_guard<std::mutex> lock(mu_);
-            if (pending_requests_.contains(req_id)) {
-                // It is a pending request, safe to move payload now
-                // We unlock here to avoid deadlocking if the callback calls back into tracker
-                return complete_request(req_id, from_id, std::move(payload));
+            if (!pending_requests_.contains(req_id)) {
+                // Handle if its a broadcast
+                auto bit = broadcasts_.find(req_id);
+                if (bit != broadcasts_.end()) {
+                    bit->second.callback(from_id, std::move(payload));
+                    return true;
+                }
+                return false;
             }
-        }
+        } // lock released before calling complete_request
 
-        // Handle if its a broadcast
-        std::lock_guard<std::mutex> lock(mu_);
-        auto bit = broadcasts_.find(req_id);
-        if (bit != broadcasts_.end()) {
-            bit->second.callback(from_id, std::move(payload));
-            return true;
-        }
-
-        return false;
+        return complete_request(req_id, from_id, std::move(payload));
     }
 
 private:
@@ -112,16 +108,21 @@ private:
     std::unordered_map<std::string, BroadcastEntry> broadcasts_;
 
     bool complete_request(const std::string &req_id, const std::string &from_id, std::optional<T> payload) {
-        std::lock_guard<std::mutex> lock(mu_);
-        auto it = pending_requests_.find(req_id);
-        if (it != pending_requests_.end()) {
-            it->second.timer->cancel();
+        RequestCallback cb;
+        std::shared_ptr<boost::asio::steady_timer> timer;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            auto it = pending_requests_.find(req_id);
+            if (it == pending_requests_.end()) return false;
 
-            it->second.callback(from_id, std::move(payload));
+            timer = it->second.timer;
+            cb = std::move(it->second.callback);
             pending_requests_.erase(it);
-            return true;
-        }
-        return false;
+        } // lock released before invoking callback
+
+        timer->cancel();
+        cb(from_id, std::move(payload));
+        return true;
     }
 
     void fail_request(const std::string &req_id, std::exception_ptr e) {
