@@ -85,8 +85,8 @@ target_include_directories(mesh_core
 )
 
 if (CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-    add_executable(MeshNetworking main.cpp)
-    target_link_libraries(MeshNetworking PRIVATE mesh_core)
+    add_executable(mesh_node main.cpp)
+    target_link_libraries(mesh_node PRIVATE mesh_core)
 
     enable_testing()
     add_subdirectory(tests)
