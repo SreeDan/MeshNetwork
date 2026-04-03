@@ -3,9 +3,9 @@
 #include <thread>
 #include <boost/asio.hpp>
 
-#include "Logger.h"
+#include "mesh/logging/Logger.h"
 #include "yaml-cpp/yaml.h"
-#include "MeshNode.h"
+#include "mesh/node/MeshNode.h"
 
 std::shared_ptr<boost::asio::ssl::context> make_ssl_context(
     const std::string &cert_file,

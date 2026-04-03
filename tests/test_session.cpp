@@ -2,9 +2,9 @@
 #include <boost/uuid/random_generator.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include "IStream.h"
-#include "MessageUtils.h"
-#include "Session.h"
+#include "mesh/utils/MessageUtils.h"
+#include "mesh/net/Session.h"
+#include "mesh/net/IStream.h"
 
 class MockStream : public StreamLayer {
 public:

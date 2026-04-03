@@ -38,26 +38,26 @@ file(GLOB PROTO_FILES "${CMAKE_CURRENT_SOURCE_DIR}/proto/*.proto")
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
 
 add_library(mesh_core
-        src/node/MeshNode.cpp
-        src/net/Session.cpp
-        src/net/Stream.cpp
-        src/net/udp/UdpTransport.cpp
-        src/rpc/RpcConnection.cpp
-        src/rpc/RpcManager.cpp
-        src/rpc/handlers/HandshakeHandler.cpp
-        src/rpc/handlers/HeartbeatHandler.cpp
-        src/proto_types/EnvelopeUtils.cpp
-        src/proto_types/RoutedPacketUtils.cpp
-        src/routing/MeshRouter.cpp
-        src/graph/GraphManager.cpp
-        src/utils/MessageUtils.cpp
-        src/utils/StringUtils.cpp
-        src/utils/FileUtils.cpp
-        src/logging/Logger.cpp
-        src/crypto/IdentityManager.cpp
-        src/crypto/CertHelpers.cpp
-        src/crypto/CryptoHelpers.cpp
-        src/crypto/PacketSecurity.cpp
+        src/mesh/node/MeshNode.cpp
+        src/mesh/net/Session.cpp
+        src/mesh/net/Stream.cpp
+        src/mesh/net/udp/UdpTransport.cpp
+        src/mesh/rpc/RpcConnection.cpp
+        src/mesh/rpc/RpcManager.cpp
+        src/mesh/rpc/handlers/HandshakeHandler.cpp
+        src/mesh/rpc/handlers/HeartbeatHandler.cpp
+        src/mesh/proto_types/EnvelopeUtils.cpp
+        src/mesh/proto_types/RoutedPacketUtils.cpp
+        src/mesh/routing/MeshRouter.cpp
+        src/mesh/graph/GraphManager.cpp
+        src/mesh/utils/MessageUtils.cpp
+        src/mesh/utils/StringUtils.cpp
+        src/mesh/utils/FileUtils.cpp
+        src/mesh/logging/Logger.cpp
+        src/mesh/crypto/IdentityManager.cpp
+        src/mesh/crypto/CertHelpers.cpp
+        src/mesh/crypto/CryptoHelpers.cpp
+        src/mesh/crypto/PacketSecurity.cpp
         ${PROTO_SRCS}
         ${PROTO_HDRS}
 )
@@ -79,19 +79,9 @@ target_link_libraries(mesh_core PUBLIC
 )
 
 target_include_directories(mesh_core
-        PUBLIC
+        SYSTEM PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/graph
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/net
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/net/udp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/node
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/proto_types
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/routing
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/rpc
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/logging
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/crypto
 )
 
 if (CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
