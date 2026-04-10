@@ -6,7 +6,43 @@
 #include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
 #include <openssl/pem.h>
-#include <openssl/err.h>
+
+#include "mesh/logging/Logger.h"
+
+
+std::shared_ptr<boost::asio::ssl::context> CertHelpers::make_ssl_context(
+    const std::string &cert_file,
+    const std::string &key_file,
+    const std::string &ca_file
+) {
+    try {
+        OPENSSL_init_ssl(OPENSSL_INIT_NO_LOAD_CONFIG, NULL);
+        std::shared_ptr<boost::asio::ssl::context> ssl_ctx;
+
+        // initialize context for TLS v1.2 or v1.3
+        ssl_ctx = std::make_shared<boost::asio::ssl::context>(boost::asio::ssl::context::tls_server);
+
+        ssl_ctx->set_options(
+            boost::asio::ssl::context::default_workarounds |
+            boost::asio::ssl::context::no_sslv2 |
+            boost::asio::ssl::context::single_dh_use
+        );
+
+        // Load certificates from the file paths
+        ssl_ctx->use_certificate_chain_file(cert_file);
+        ssl_ctx->use_private_key_file(key_file, boost::asio::ssl::context::pem);
+
+        // If you need to verify peers (mutual TLS), load the CA
+        if (!ca_file.empty()) {
+            ssl_ctx->load_verify_file(ca_file);
+            ssl_ctx->set_verify_mode(boost::asio::ssl::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
+        }
+
+        return ssl_ctx;
+    } catch (const std::exception &e) {
+        throw std::runtime_error("TLS Setup Failed: " + std::string(e.what()));
+    }
+}
 
 bool CertHelpers::verify_certificate(const std::string &cert_pem, const std::string &ca_root_pem) {
     BIO *ca_bio = BIO_new_mem_buf(ca_root_pem.c_str(), -1);

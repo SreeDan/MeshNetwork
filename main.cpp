@@ -3,44 +3,19 @@
 #include <thread>
 #include <boost/asio.hpp>
 
+#include "mesh/crypto/CertHelpers.h"
 #include "mesh/logging/Logger.h"
 #include "yaml-cpp/yaml.h"
 #include "mesh/node/MeshNode.h"
 
-std::shared_ptr<boost::asio::ssl::context> make_ssl_context(
-    const std::string &cert_file,
-    const std::string &key_file,
-    const std::string &ca_file
-) {
-    try {
-        OPENSSL_init_ssl(OPENSSL_INIT_NO_LOAD_CONFIG, NULL);
-        std::shared_ptr<boost::asio::ssl::context> ssl_ctx;
-
-        // initialize context for TLS v1.2 or v1.3
-        ssl_ctx = std::make_shared<boost::asio::ssl::context>(boost::asio::ssl::context::tls_server);
-
-        ssl_ctx->set_options(
-            boost::asio::ssl::context::default_workarounds |
-            boost::asio::ssl::context::no_sslv2 |
-            boost::asio::ssl::context::single_dh_use
-        );
-
-        // Load certificates from the file paths
-        ssl_ctx->use_certificate_chain_file(cert_file);
-        ssl_ctx->use_private_key_file(key_file, boost::asio::ssl::context::pem);
-
-        // If you need to verify peers (mutual TLS), load the CA
-        if (!ca_file.empty()) {
-            ssl_ctx->load_verify_file(ca_file);
-            ssl_ctx->set_verify_mode(boost::asio::ssl::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
-        }
-
-        Log::debug("tls", {}, "TLS Context initialized successfully");
-
-        return ssl_ctx;
-    } catch (const std::exception &e) {
-        throw std::runtime_error("TLS Setup Failed: " + std::string(e.what()));
+std::vector<std::string> tokenize(const std::string &line) {
+    std::istringstream iss(line);
+    std::vector<std::string> tokens;
+    std::string word;
+    while (iss >> word) {
+        tokens.push_back(word);
     }
+    return tokens;
 }
 
 int main(int argc, char **argv) {
@@ -54,53 +29,46 @@ int main(int argc, char **argv) {
     int udp_port = config["udp-port"].as<int>();
     std::string peer_id = config["peer-id"].as<std::string>();
 
-    std::filesystem::path output_dir;
-    if (config["output-dir"]) {
-        output_dir = config["output-dir"].as<std::string>();
-    } else {
-        output_dir = std::filesystem::current_path() / "out";
-    }
+    std::filesystem::path output_dir =
+            config["output-dir"]
+                ? std::filesystem::path(config["output-dir"].as<std::string>())
+                : std::filesystem::current_path() / "out";
 
     try {
-        if (std::filesystem::create_directories(output_dir)) {
-            std::cout << "Successfully created directory path: " << output_dir << std::endl;
-        } else {
-            std::cout << "Directory path already exists or a non-error condition occurred." << std::endl;
-        }
+        std::filesystem::create_directories(output_dir);
     } catch (const std::filesystem::filesystem_error &e) {
-        std::cerr << "Error creating directory path: " << e.what() << std::endl;
+        std::cerr << "Error creating directory: " << e.what() << std::endl;
     }
 
-
-    bool is_debug_mode = false;
-    if (config["debug"]) {
-        is_debug_mode = config["debug"].as<bool>();
-    }
+    bool is_debug_mode = config["debug"] ? config["debug"].as<bool>() : false;
 
     Log::init(peer_id, output_dir / "node_log.txt", is_debug_mode);
-
     Log::info("main", {}, "Welcome to MeshNetworking!");
 
     bool use_tls = false;
-    std::string cert, key, ca;
     bool encrypt_messages = false;
-    if (config["tls"] && config["tls"]["cert-path"] && config["tls"]["key-path"] && config["tls"]["ca-path"]) {
+    std::string cert, key, ca;
+
+    if (config["tls"] &&
+        config["tls"]["cert-path"] &&
+        config["tls"]["key-path"] &&
+        config["tls"]["ca-path"]) {
         use_tls = true;
         cert = config["tls"]["cert-path"].as<std::string>();
         key = config["tls"]["key-path"].as<std::string>();
         ca = config["tls"]["ca-path"].as<std::string>();
 
-        // encryption relies on the three pems above to be present
-        if (config["tls"] && config["tls"]["encrypt-messages"]) {
+        if (config["tls"]["encrypt-messages"]) {
             encrypt_messages = true;
         }
     }
 
     std::shared_ptr<boost::asio::ssl::context> ssl_ctx = nullptr;
-    std::shared_ptr<IdentityManager> identity_manager = std::make_shared<IdentityManager>();
+    auto identity_manager = std::make_shared<IdentityManager>();
+
     if (use_tls) {
         try {
-            ssl_ctx = make_ssl_context(cert, key, ca);
+            ssl_ctx = CertHelpers::make_ssl_context(cert, key, ca);
         } catch (const std::exception &e) {
             std::cerr << e.what() << std::endl;
             return 1;
@@ -115,84 +83,114 @@ int main(int argc, char **argv) {
     MeshNode node(ioc, tcp_port, udp_port, peer_id, ssl_ctx, identity_manager, encrypt_messages);
 
     node.set_output_directory(output_dir);
-
     node.start();
 
     if (config["auto_connect"]) {
-        const YAML::Node &auto_connect = config["auto_connect"];
-        for (const auto &elem: auto_connect) {
+        for (const auto &elem: config["auto_connect"]) {
             if (!elem["ip"] || !elem["port"]) {
-                Log::warn("yaml_parse", {}, "malformed auto_conect config, should have an ip and port present");
+                Log::warn("yaml_parse", {}, "Malformed auto_connect entry");
                 continue;
             }
 
             std::string ip = elem["ip"].as<std::string>();
-            int tcp_port = elem["port"].as<int>();
+            int port = elem["port"].as<int>();
 
-            Log::debug("yaml_parser", {{"ip", ip}, {"port", tcp_port}}, "detected auto connect configuration");
-            node.add_auto_connection(ip, tcp_port);
+            node.add_auto_connection(ip, port);
         }
     }
 
-    std::thread t([&ioc]() { ioc.run(); });
-    // TODO: Add automatic connections to config yaml
+    std::thread io_thread([&ioc]() { ioc.run(); });
+
+    using CommandHandler = std::function<void(const std::vector<std::string> &)>;
+    std::unordered_map<std::string, CommandHandler> commands;
+
+    commands["connect"] = [&](const std::vector<std::string> &args) {
+        if (args.size() < 2) {
+            std::cout << "Usage: connect <host> <port>\n";
+            return;
+        }
+        node.connect(args[0], std::stoi(args[1]));
+    };
+
+    commands["dm"] = [&](const std::vector<std::string> &args) {
+        if (args.size() < 2) {
+            std::cout << "Usage: dm <peer> <message>\n";
+            return;
+        }
+
+        std::string target = args[0];
+        std::string msg;
+
+        for (size_t i = 1; i < args.size(); ++i) {
+            if (i > 1) msg += " ";
+            msg += args[i];
+        }
+
+        node.send_text(target, msg);
+    };
+
+    commands["topology"] = [&](const std::vector<std::string> &args) {
+        if (args.empty()) {
+            std::cout << "Usage: topology <output_path>\n";
+            return;
+        }
+        node.generate_topology_graph(args[0]);
+    };
+
+    commands["ping"] = [&](const std::vector<std::string> &args) {
+        if (args.empty()) {
+            std::cout << "Usage: ping <peer>\n";
+            return;
+        }
+        node.ping(args[0]);
+    };
+
+    commands["get_nodes"] = [&](const std::vector<std::string> &) {
+        auto nodes = node.get_nodes_in_network();
+        std::cout << nodes.size() << " node(s)\n";
+        for (const auto &n: nodes) {
+            std::cout << n << "\n";
+        }
+    };
+
+    commands["block"] = [&](const std::vector<std::string> &) {
+        node.set_block_all_messages(true);
+    };
+
+    commands["unblock"] = [&](const std::vector<std::string> &) {
+        node.set_block_all_messages(false);
+    };
+
+    commands["help"] = [&](const std::vector<std::string> &) {
+        std::cout << "Available commands:\n";
+        for (const auto &[name, _]: commands) {
+            std::cout << " - " << name << "\n";
+        }
+    };
 
     std::string line;
     while (std::getline(std::cin, line)) {
-        if (line.rfind("connect ", 0) == 0) {
-            // Command: connect <host> <port>
-            std::istringstream iss(line.substr(8));
-            std::string host;
-            int port;
-            std::string new_peer_id;
-            if (iss >> host >> port >> new_peer_id) {
-                node.connect(host, port);
-            } else {
-                std::cout << "Usage: connect <host> <port>\n";
-            }
-        } else if (line.rfind("dm ", 0) == 0) {
-            auto pos = line.find(' ', 3);
-            if (pos != std::string::npos) {
-                std::string target = line.substr(3, pos - 3);
-                std::string msg = line.substr(pos + 1);
-                node.send_text(target, msg);
-            }
-        } else if (line.rfind("broadcast ", 0) == 0) {
-            // node.broadcast_text(line.substr(10));
-        } else if (line.starts_with("topology")) {
-            std::string arg = line.substr(std::string("topology").size());
-            std::istringstream iss(arg);
+        auto tokens = tokenize(line);
+        if (tokens.empty()) continue;
 
-            std::string dest;
-            iss >> dest;
+        std::string cmd = tokens[0];
+        tokens.erase(tokens.begin());
 
-            if (dest.empty()) {
-                std::cout << "Usage: topology <output_path>\n";
-            }
-            node.generate_topology_graph(dest);
-        } else if (line.starts_with("ping")) {
-            std::string arg = line.substr(std::string("ping").size());
-            std::istringstream iss(arg);
+        if (cmd == "exit" || cmd == "quit") {
+            break;
+        }
 
-            std::string peer;
-            iss >> peer;
-            node.ping(peer);
-        } else if (line == "get_nodes") {
-            std::vector<std::string> nodes = node.get_nodes_in_network();
-            std::cout << nodes.size() << " node(s)" << std::endl;
-            for (size_t i = 0; i < nodes.size(); ++i) {
-                std::cout << nodes[i] << std::endl;
-            }
-        } else if (line == "block") {
-            node.set_block_all_messages(true);
-        } else if (line == "unblock") {
-            node.set_block_all_messages(false);
-        } else if (line == "quit" || line == "exit") break;
-        else std::cout << "Commands: broadcast <text>, dm <peer> <text>, exit\n";
+        auto it = commands.find(cmd);
+        if (it != commands.end()) {
+            it->second(tokens);
+        } else {
+            std::cout << "Unknown command. Type 'help'\n";
+        }
     }
 
     node.stop();
     ioc.stop();
-    t.join();
+    io_thread.join();
+
     return 0;
 }
