@@ -13,6 +13,8 @@ public:
 
     void send_packet(boost::asio::ip::udp::endpoint &dest_ep, const mesh::RoutedPacket &pkt);
 
+    void shutdown();
+
     void set_on_receive(std::function<void(boost::asio::ip::udp::endpoint, std::string)> callback);
 
 private:

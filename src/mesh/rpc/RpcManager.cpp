@@ -56,7 +56,9 @@ void RpcManager::register_handlers() {
     handlers_[mesh::EnvelopeType::HEARTBEAT] = std::make_unique<HeartbeatHandler>();
 }
 
-RpcManager::~RpcManager() = default;
+RpcManager::~RpcManager() {
+    shutdown();
+}
 
 void RpcManager::start_listening() {
     try {
@@ -88,11 +90,51 @@ void RpcManager::start_listening() {
 }
 
 void RpcManager::shutdown() {
+    std::lock_guard<std::mutex> shutdown_guard(shutdown_mu_);
+
+    if (shutting_down_) {
+        heartbeat_cv_.notify_all();
+        if (heartbeat_thread_.joinable() && heartbeat_thread_.get_id() != std::this_thread::get_id()) {
+            heartbeat_thread_.join();
+        }
+        return;
+    }
+
+    shutting_down_ = true;
+
+    boost::system::error_code ec;
+    acceptor_.cancel(ec);
+    acceptor_.close(ec);
+    maintenance_timer_.cancel();
+    if (udp_transport_) {
+        udp_transport_->shutdown();
+    }
+
+    std::vector<std::shared_ptr<RpcConnection> > connections;
+    {
+        std::lock_guard<std::mutex> guard(mu_);
+        for (auto &[_, conn]: connections_by_peer_) {
+            connections.push_back(conn);
+        }
+        connections_by_peer_.clear();
+        connections_by_ip_.clear();
+        auto_connections_.clear();
+    }
+
+    for (const auto &conn: connections) {
+        conn->shutdown();
+    }
+
+    heartbeat_cv_.notify_all();
+    if (heartbeat_thread_.joinable() && heartbeat_thread_.get_id() != std::this_thread::get_id()) {
+        heartbeat_thread_.join();
+    }
 }
 
 
 void RpcManager::do_accept() {
     acceptor_.async_accept([this](boost::system::error_code ec, boost::asio::ip::tcp::socket sock) {
+        if (shutting_down_) return;
         if (ec == boost::asio::error::operation_aborted) return;
 
         if (!ec) {
@@ -268,7 +310,7 @@ void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
         peer_id_, "", 1, mesh::Heartbeat::descriptor()->full_name(), mesh::UDP
     );
 
-    while (true) {
+    while (!shutting_down_) {
         std::vector<std::string> peers;
         {
             std::lock_guard<std::mutex> guard(mu_);
@@ -280,6 +322,10 @@ void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
 
         std::unordered_map<std::string, std::future<std::string> > futures;
         for (const auto &peer: peers) {
+            if (shutting_down_) {
+                return;
+            }
+
             std::lock_guard<std::mutex> guard(mu_);
             auto it = connections_by_peer_.find(peer);
             if (it == connections_by_peer_.end())
@@ -307,6 +353,10 @@ void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
         }
 
         for (auto &pair: futures) {
+            if (shutting_down_) {
+                return;
+            }
+
             std::string peer = pair.first;
             std::future<std::string> fut = std::move(pair.second);
             try {
@@ -327,7 +377,8 @@ void RpcManager::send_heartbeats(std::chrono::milliseconds timeout) {
             }
         }
 
-        std::this_thread::sleep_for(10s);
+        std::unique_lock<std::mutex> lock(mu_);
+        heartbeat_cv_.wait_for(lock, 10s, [this] { return shutting_down_.load(); });
     }
 }
 
@@ -377,8 +428,16 @@ void RpcManager::remove_auto_connection(const mesh::PeerIP &record) {
 }
 
 void RpcManager::run_maintenance_cycle() {
+    if (shutting_down_) {
+        return;
+    }
+
     maintenance_timer_.expires_after(std::chrono::seconds(5));
     maintenance_timer_.async_wait([this](const boost::system::error_code &ec) {
+        if (shutting_down_) {
+            return;
+        }
+
         if (ec == boost::asio::error::operation_aborted) {
             return;
         }
@@ -393,6 +452,10 @@ void RpcManager::run_maintenance_cycle() {
 }
 
 void RpcManager::check_for_auto_connections_locked() {
+    if (shutting_down_) {
+        return;
+    }
+
     for (const auto &target_ip: auto_connections_) {
         if (connections_by_ip_.find(target_ip.ip()) != connections_by_ip_.end()) {
             continue;
@@ -401,6 +464,10 @@ void RpcManager::check_for_auto_connections_locked() {
         Log::info("maintenance", {}, "found missing connection, attempting reconnect...");
 
         std::thread([this, target_ip]() {
+            if (shutting_down_) {
+                return;
+            }
+
             try {
                 connect(target_ip.ip(), target_ip.tcp_port());
             } catch (const std::exception &e) {

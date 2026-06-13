@@ -13,6 +13,10 @@ UdpTransport::UdpTransport(boost::asio::io_context &ioc, uint16_t port)
 
 
 void UdpTransport::send_packet(boost::asio::ip::udp::endpoint &dest_ep, const mesh::RoutedPacket &pkt) {
+    if (!socket_.is_open()) {
+        return;
+    }
+
     std::string payload = pkt.SerializeAsString();
 
     // We duplicate payload into a shared_ptr or string to keep it alive for the async op
@@ -31,15 +35,29 @@ void UdpTransport::send_packet(boost::asio::ip::udp::endpoint &dest_ep, const me
     );
 }
 
+void UdpTransport::shutdown() {
+    boost::system::error_code ec;
+    socket_.cancel(ec);
+    socket_.close(ec);
+}
+
 void UdpTransport::set_on_receive(std::function<void(boost::asio::ip::udp::endpoint, std::string)> callback) {
     on_receive_cb_ = callback;
 }
 
 void UdpTransport::start_receive() {
+    if (!socket_.is_open()) {
+        return;
+    }
+
     socket_.async_receive_from(
         boost::asio::buffer(recv_buffer_),
         remote_endpoint_,
         [this](boost::system::error_code ec, std::size_t bytes_recvd) {
+            if (ec == boost::asio::error::operation_aborted || !socket_.is_open()) {
+                return;
+            }
+
             if (!ec && bytes_recvd > 0) {
                 std::string raw_data(recv_buffer_.data(), bytes_recvd);
                 if (on_receive_cb_) {

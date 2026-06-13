@@ -43,6 +43,8 @@ public:
         std::chrono::milliseconds timeout = 3000ms
     );
 
+    void shutdown();
+
     mesh::PeerIP get_local_peer_ip();
 
     mesh::PeerIP get_remote_peer_ip();
@@ -82,4 +84,3 @@ private:
 
     void store_response(const boost::uuids::uuid &msg_id, const std::string &resp_payload);
 };
-

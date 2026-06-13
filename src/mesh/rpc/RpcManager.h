@@ -1,5 +1,8 @@
 #pragma once
+#include <atomic>
+#include <condition_variable>
 #include <expected>
+#include <thread>
 #include "mesh/rpc/IRpcMessageHandler.h"
 #include "mesh/rpc/ITrasportLayer.h"
 #include "mesh/rpc/RpcConnection.h"
@@ -62,6 +65,9 @@ private:
 
     std::vector<mesh::PeerIP> auto_connections_;
 
+    std::mutex shutdown_mu_;
+    std::atomic_bool shutting_down_{false};
+    std::condition_variable heartbeat_cv_;
     std::thread heartbeat_thread_;
     std::unordered_map<mesh::EnvelopeType, std::unique_ptr<IRpcMessageHandler> > handlers_;
 

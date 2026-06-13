@@ -27,6 +27,14 @@ RpcConnection::RpcConnection(boost::asio::io_context &ioc,
 }
 
 RpcConnection::~RpcConnection() {
+    shutdown();
+}
+
+void RpcConnection::shutdown() {
+    if (session_) {
+        session_->stop();
+    }
+
     std::lock_guard<std::mutex> guard(mu_);
     for (auto &[req_id, pending_req]: pending_requests_) {
         if (pending_req.timer) {
