@@ -8,6 +8,8 @@ FetchContent_MakeAvailable(Catch2)
 
 add_executable(unit_tests
         test_session.cpp
+        test_stream.cpp
+        test_udp.cpp
 )
 
 target_link_libraries(unit_tests PRIVATE
