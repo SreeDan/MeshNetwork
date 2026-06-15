@@ -48,6 +48,33 @@ int main(int argc, char **argv) {
     bool use_tls = false;
     bool encrypt_messages = false;
     std::string cert, key, ca;
+    UdpFecOptions udp_fec_options;
+
+    if (config["udp-fec"]) {
+        const auto fec = config["udp-fec"];
+        udp_fec_options.enabled = fec["enabled"] ? fec["enabled"].as<bool>() : true;
+
+        const int data_shards = fec["data-shards"] ? fec["data-shards"].as<int>() : udp_fec_options.data_shards;
+        const int roots = fec["roots"] ? fec["roots"].as<int>() : 0;
+        if (data_shards < 1 || data_shards > 253) {
+            std::cerr << "udp-fec.data-shards must be between 1 and 253\n";
+            return 1;
+        }
+        if (roots < 0 || roots > 253) {
+            std::cerr << "udp-fec.roots must be between 0 and 253\n";
+            return 1;
+        }
+        if (data_shards + roots > 254) {
+            std::cerr << "udp-fec.data-shards + udp-fec.roots must be <= 254\n";
+            return 1;
+        }
+
+        udp_fec_options.data_shards = static_cast<uint8_t>(data_shards);
+        udp_fec_options.roots = static_cast<uint8_t>(roots);
+        if (udp_fec_options.roots == 0) {
+            udp_fec_options.enabled = false;
+        }
+    }
 
     if (config["tls"] &&
         config["tls"]["cert-path"] &&
@@ -80,7 +107,7 @@ int main(int argc, char **argv) {
     }
 
     boost::asio::io_context ioc;
-    MeshNode node(ioc, tcp_port, udp_port, peer_id, ssl_ctx, identity_manager, encrypt_messages);
+    MeshNode node(ioc, tcp_port, udp_port, peer_id, ssl_ctx, identity_manager, encrypt_messages, udp_fec_options);
 
     node.set_output_directory(output_dir);
     node.start();

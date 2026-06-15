@@ -31,7 +31,8 @@ public:
         const std::string &peer_id,
         std::shared_ptr<boost::asio::ssl::context> ssl_ctx,
         std::shared_ptr<IdentityManager> identity_manager_,
-        bool encrypt_messages);
+        bool encrypt_messages,
+        UdpFecOptions udp_fec_options = {});
 
     void start();
 
@@ -382,5 +383,3 @@ void MeshNode::on(HandlerT &&handler) {
         }
     };
 }
-
-

@@ -19,13 +19,14 @@ MeshNode::MeshNode(
     const std::string &peer_id,
     std::shared_ptr<boost::asio::ssl::context> ssl_ctx,
     std::shared_ptr<IdentityManager> identity_manager,
-    bool encrypt_messages)
+    bool encrypt_messages,
+    UdpFecOptions udp_fec_options)
     : ioc_(ioc),
       tcp_port_(tcp_port),
       udp_port_(udp_port),
       peer_id_(peer_id),
       ssl_ctx_(std::move(ssl_ctx)),
-      rpc_connections(std::make_shared<RpcManager>(ioc, peer_id, tcp_port, udp_port)),
+      rpc_connections(std::make_shared<RpcManager>(ioc, peer_id, tcp_port, udp_port, nullptr, ssl_ctx_, udp_fec_options)),
       router_(std::make_shared<MeshRouter>(ioc, peer_id)),
       identity_(identity_manager),
       security_(std::make_unique<PacketSecurity>(identity_manager)),

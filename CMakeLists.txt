@@ -41,6 +41,7 @@ add_library(mesh_core
         src/mesh/node/MeshNode.cpp
         src/mesh/net/Session.cpp
         src/mesh/net/Stream.cpp
+        src/mesh/net/udp/FecCodec.cpp
         src/mesh/net/udp/UdpTransport.cpp
         src/mesh/rpc/RpcConnection.cpp
         src/mesh/rpc/RpcManager.cpp

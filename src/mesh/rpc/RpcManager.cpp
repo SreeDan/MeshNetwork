@@ -19,14 +19,15 @@ RpcManager::RpcManager(boost::asio::io_context &ioc,
                        int tcp_port,
                        int udp_port,
                        std::shared_ptr<IMessageSink> sink,
-                       std::shared_ptr<boost::asio::ssl::context> ssl_ctx)
+                       std::shared_ptr<boost::asio::ssl::context> ssl_ctx,
+                       UdpFecOptions udp_fec_options)
     : ioc_(ioc),
       tcp_port_(tcp_port),
       udp_port_(udp_port),
       acceptor_(ioc),
       peer_id_(peer_id),
       sink_(sink),
-      udp_transport_(std::make_unique<UdpTransport>(ioc, udp_port)),
+      udp_transport_(std::make_unique<UdpTransport>(ioc, udp_port, udp_fec_options)),
       ssl_ctx_(std::move(ssl_ctx)) {
     register_handlers();
     using namespace std::chrono_literals;

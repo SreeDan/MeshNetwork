@@ -21,7 +21,8 @@ public:
                int tcp_port,
                int udp_port,
                std::shared_ptr<IMessageSink> sink = nullptr,
-               std::shared_ptr<boost::asio::ssl::context> ssl_ctx = nullptr);
+               std::shared_ptr<boost::asio::ssl::context> ssl_ctx = nullptr,
+               UdpFecOptions udp_fec_options = {});
 
     ~RpcManager();
 
