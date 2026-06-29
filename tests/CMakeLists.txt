@@ -7,7 +7,9 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(Catch2)
 
 add_executable(unit_tests
+        test_command_utils.cpp
         test_fec.cpp
+        test_rpc_manager.cpp
         test_session.cpp
         test_stream.cpp
         test_udp.cpp

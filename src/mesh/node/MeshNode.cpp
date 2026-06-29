@@ -1,7 +1,6 @@
 #include "mesh/node/MeshNode.h"
 
 #include <filesystem>
-#include <iostream>
 #include <utility>
 
 #include "mesh/crypto/CertHelpers.h"
@@ -99,24 +98,24 @@ void MeshNode::setup_builtin_handlers() {
 
 
 void MeshNode::connect(const std::string &host, int port) {
-    try {
-        std::expected<std::string, std::string> peer_response = rpc_connections->connect(host, port);
-
-        if (peer_response.has_value()) {
-            Log::info("connect_to",
-                      {{"peer_id", peer_response.value()}},
-                      "connected to remote peer");
-        } else {
-            Log::error("connect_to",
-                       {{"err", peer_response.error()}},
-                       "failed to connect to remote peer");
-            throw std::runtime_error("failed to connect to remote peer");
-        }
-    } catch (std::exception &e) {
-        Log::error("mesh_node.connect",
-                   {"err", e.what()},
-                   "failed to connect to remote");
-    }
+    Log::info("connect_to",
+              {{"host", host}, {"port", port}},
+              "connecting to remote peer");
+    rpc_connections->connect_async(
+        host,
+        port,
+        std::chrono::seconds(5),
+        [host, port](std::expected<std::string, std::string> peer_response) {
+            if (peer_response.has_value()) {
+                Log::info("connect_to",
+                          {{"peer_id", peer_response.value()}, {"host", host}, {"port", port}},
+                          "connected to remote peer");
+            } else {
+                Log::error("connect_to",
+                           {{"host", host}, {"port", port}, {"err", peer_response.error()}},
+                           "failed to connect to remote peer");
+            }
+        });
 }
 
 void MeshNode::send_text(const std::string &remote_id, const std::string &text) {

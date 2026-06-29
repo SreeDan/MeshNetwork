@@ -14,6 +14,26 @@
 #include "packet.pb.h"
 #include "mesh/proto_types/RoutedPacketUtils.h"
 
+namespace {
+    struct ConnectAttemptState {
+        boost::asio::ip::tcp::resolver resolver;
+        boost::asio::ip::tcp::socket socket;
+        boost::asio::steady_timer timer;
+        std::atomic_bool completed{false};
+        std::shared_ptr<RpcConnection> conn;
+        std::string key;
+        std::chrono::steady_clock::time_point deadline;
+
+        ConnectAttemptState(boost::asio::io_context &ioc, std::string key, std::chrono::milliseconds timeout)
+            : resolver(ioc),
+              socket(ioc),
+              timer(ioc),
+              key(std::move(key)),
+              deadline(std::chrono::steady_clock::now() + timeout) {
+        }
+    };
+}
+
 RpcManager::RpcManager(boost::asio::io_context &ioc,
                        const std::string &peer_id,
                        int tcp_port,
@@ -163,39 +183,123 @@ void RpcManager::set_sink(const std::shared_ptr<IMessageSink> &sink) {
     sink_ = sink;
 }
 
-// std::expected<std::string, std::string> RpcManager::create_connection(const std::string &remote_addr,
-//                                                                       boost::asio::ip::tcp::socket sock) {
-//     auto rpc_connection = std::make_shared<RpcConnection>(ioc_, std::move(sock), peer_id_, ssl_ctx_);
-//     rpc_connection->set_on_dispatch([this](auto conn, const auto &env) {
-//         this->dispatch_message(conn, env);
-//     });
-//
-//     // Safe to block the main thread while waiting for a handshake
-//     auto res = rpc_connection->start(true); // Blocking call
-//     if (res.has_value()) {
-//         auto remote_peer_id = res.value().peer_id();
-//         rpc_connection->set_remote_peer_id(remote_peer_id);
-//         add_connection_internal(remote_peer_id, rpc_connection);
-//
-//
-//         return remote_peer_id;
-//     } else {
-//         return std::unexpected(res.error());
-//     }
-// }
 
-std::expected<std::string, std::string> RpcManager::connect(const std::string &host, int port) {
-    boost::asio::ip::tcp::socket sock(ioc_);
-    boost::asio::ip::tcp::resolver resolver(ioc_);
+std::expected<std::string, std::string> RpcManager::connect(
+    const std::string &host,
+    int port,
+    std::chrono::milliseconds timeout) {
+    std::promise<std::expected<std::string, std::string> > prom;
+    auto fut = prom.get_future();
 
-    auto endpoints = resolver.resolve(host, std::to_string(port));
-    boost::asio::connect(sock, endpoints);
-    return handle_new_connection(std::move(sock), true);
+    connect_async(
+        host,
+        port,
+        timeout,
+        [&prom](std::expected<std::string, std::string> result) mutable {
+            prom.set_value(std::move(result));
+        });
+
+    return fut.get();
+}
+
+void RpcManager::connect_async(
+    const std::string &host,
+    int port,
+    std::chrono::milliseconds timeout,
+    ConnectCallback callback) {
+    const std::string key = host + ":" + std::to_string(port);
+    {
+        std::lock_guard<std::mutex> guard(mu_);
+        if (pending_connections_.contains(key) || connections_by_ip_.contains(host)) {
+            if (callback) callback(std::unexpected("connection already pending or active"));
+            return;
+        }
+        pending_connections_.insert(key);
+    }
+
+    auto state = std::make_shared<ConnectAttemptState>(ioc_, key, timeout);
+    auto complete = [this, state, callback = std::move(callback)](
+                        std::expected<std::string, std::string> result) mutable {
+        if (state->completed.exchange(true)) return;
+
+        const bool success = result.has_value();
+        state->timer.cancel();
+        state->resolver.cancel();
+
+        boost::system::error_code ignored;
+        state->socket.cancel(ignored);
+        state->socket.close(ignored);
+        if (!success && state->conn) {
+            state->conn->shutdown();
+        }
+
+        {
+            std::lock_guard<std::mutex> guard(mu_);
+            pending_connections_.erase(state->key);
+        }
+
+        if (callback) callback(std::move(result));
+    };
+
+    state->timer.expires_after(timeout);
+    state->timer.async_wait([complete](const boost::system::error_code &ec) mutable {
+        if (ec == boost::asio::error::operation_aborted) return;
+        complete(std::unexpected("connect timed out"));
+    });
+
+    state->resolver.async_resolve(
+        host,
+        std::to_string(port),
+        [this, state, complete](const boost::system::error_code &ec,
+                                boost::asio::ip::tcp::resolver::results_type endpoints) mutable {
+            if (state->completed.load()) return;
+            if (ec) {
+                complete(std::unexpected("resolve failed: " + ec.message()));
+                return;
+            }
+
+            boost::asio::async_connect(
+                state->socket,
+                endpoints,
+                [this, state, complete](const boost::system::error_code &ec,
+                                        const boost::asio::ip::tcp::endpoint &) mutable {
+                    if (state->completed.load()) return;
+                    if (ec) {
+                        complete(std::unexpected("tcp connect failed: " + ec.message()));
+                        return;
+                    }
+
+                    state->conn = std::make_shared<RpcConnection>(
+                        ioc_, std::move(state->socket), peer_id_, udp_port_, ssl_ctx_);
+                    state->conn->set_on_dispatch([this](auto conn, const auto &env) {
+                        this->dispatch_message(std::move(conn), env);
+                    });
+
+                    const auto now = std::chrono::steady_clock::now();
+                    const auto remaining = now >= state->deadline
+                                               ? std::chrono::milliseconds(1)
+                                               : std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                   state->deadline - now);
+
+                    std::thread([this, state, remaining, complete]() mutable {
+                        auto res = handle_connection_startup(state->conn, true, remaining);
+                        boost::asio::post(ioc_, [complete, res = std::move(res)]() mutable {
+                            if (!res.has_value()) {
+                                complete(std::unexpected(res.error()));
+                                return;
+                            }
+
+                            complete(res.value());
+                        });
+                    }).detach();
+                });
+        });
 }
 
 std::expected<std::string, std::string> RpcManager::handle_connection_startup(std::shared_ptr<RpcConnection> conn,
-                                                                              bool initiator) {
-    auto res = conn->start(initiator); // Blocking call
+                                                                              bool initiator,
+                                                                              std::chrono::milliseconds timeout) {
+    auto res = conn->start(initiator, timeout); // Blocking call
     if (res.has_value()) {
         const std::string &remote_peer_id = res.value().peer_id();
         conn->set_remote_peer_id(remote_peer_id);
@@ -217,7 +321,7 @@ std::expected<std::string, std::string> RpcManager::handle_new_connection(boost:
     if (!initiator) {
         // Spawning in a new thread because we don't want to block here
         std::thread([this, rpc_connection, initiator]() {
-            auto res = handle_connection_startup(rpc_connection, initiator);
+            auto res = handle_connection_startup(rpc_connection, initiator, std::chrono::seconds(5));
             if (!res.has_value()) {
                 Log::warn("handle_new_connection", {{"err", res.error()}}, "failed to accept incoming connection");
             }
@@ -225,7 +329,7 @@ std::expected<std::string, std::string> RpcManager::handle_new_connection(boost:
         // Add note to docs about empty string returning
         return "";
     } else {
-        return handle_connection_startup(rpc_connection, initiator);
+        return handle_connection_startup(rpc_connection, initiator, std::chrono::seconds(5));
     }
 }
 
@@ -443,10 +547,7 @@ void RpcManager::run_maintenance_cycle() {
             return;
         }
 
-        {
-            std::lock_guard<std::mutex> guard(mu_);
-            check_for_auto_connections_locked();
-        }
+        check_for_auto_connections_locked();
 
         run_maintenance_cycle();
     });
@@ -457,23 +558,35 @@ void RpcManager::check_for_auto_connections_locked() {
         return;
     }
 
-    for (const auto &target_ip: auto_connections_) {
-        if (connections_by_ip_.find(target_ip.ip()) != connections_by_ip_.end()) {
-            continue;
+    std::vector<mesh::PeerIP> targets;
+    {
+        std::lock_guard<std::mutex> guard(mu_);
+        for (const auto &target_ip: auto_connections_) {
+            const std::string key = target_ip.ip() + ":" + std::to_string(target_ip.tcp_port());
+            if (connections_by_ip_.contains(target_ip.ip()) || pending_connections_.contains(key)) {
+                continue;
+            }
+
+            targets.push_back(target_ip);
         }
+    }
 
-        Log::info("maintenance", {}, "found missing connection, attempting reconnect...");
+    for (const auto &target_ip: targets) {
+        Log::info("maintenance",
+                  {{"ip", target_ip.ip()}, {"port", target_ip.tcp_port()}},
+                  "found missing connection, attempting reconnect...");
 
-        std::thread([this, target_ip]() {
-            if (shutting_down_) {
-                return;
+        connect_async(
+            target_ip.ip(),
+            target_ip.tcp_port(),
+            std::chrono::seconds(5),
+            [target_ip](std::expected<std::string, std::string> res) {
+                if (!res.has_value()) {
+                    Log::warn("maintenance",
+                              {{"ip", target_ip.ip()}, {"port", target_ip.tcp_port()}, {"err", res.error()}},
+                              "reconnect failed");
+                }
             }
-
-            try {
-                connect(target_ip.ip(), target_ip.tcp_port());
-            } catch (const std::exception &e) {
-                Log::warn("maintenance", {{"err", e.what()}}, "reconnect failed");
-            }
-        }).detach();
+        );
     }
 }

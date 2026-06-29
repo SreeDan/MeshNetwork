@@ -5,6 +5,7 @@
 
 #include "mesh/crypto/CertHelpers.h"
 #include "mesh/logging/Logger.h"
+#include "mesh/utils/CommandUtils.h"
 #include "yaml-cpp/yaml.h"
 #include "mesh/node/MeshNode.h"
 
@@ -132,11 +133,13 @@ int main(int argc, char **argv) {
     std::unordered_map<std::string, CommandHandler> commands;
 
     commands["connect"] = [&](const std::vector<std::string> &args) {
-        if (args.size() < 2) {
-            std::cout << "Usage: connect <host> <port>\n";
+        auto parsed = parse_connect_args(args);
+        if (!parsed.has_value()) {
+            std::cout << parsed.error() << "\n";
             return;
         }
-        node.connect(args[0], std::stoi(args[1]));
+
+        node.connect(parsed->first, parsed->second);
     };
 
     commands["dm"] = [&](const std::vector<std::string> &args) {

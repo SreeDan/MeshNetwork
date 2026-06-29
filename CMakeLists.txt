@@ -52,6 +52,7 @@ add_library(mesh_core
         src/mesh/routing/MeshRouter.cpp
         src/mesh/graph/GraphManager.cpp
         src/mesh/utils/MessageUtils.cpp
+        src/mesh/utils/CommandUtils.cpp
         src/mesh/utils/StringUtils.cpp
         src/mesh/utils/FileUtils.cpp
         src/mesh/logging/Logger.cpp

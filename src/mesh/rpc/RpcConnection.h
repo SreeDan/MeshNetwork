@@ -34,9 +34,12 @@ public:
 
     RpcConnection &operator=(const RpcConnection &other) = delete;
 
-    std::expected<mesh::PeerRecord, std::string> start(bool initiator);
+    std::expected<mesh::PeerRecord, std::string> start(
+        bool initiator,
+        std::chrono::milliseconds timeout = 3000ms);
 
-    std::expected<mesh::PeerRecord, std::string> send_handshake_request();
+    std::expected<mesh::PeerRecord, std::string> send_handshake_request(
+        std::chrono::milliseconds timeout = 3000ms);
 
     std::future<std::string> send_message(
         mesh::Envelope &envelope,

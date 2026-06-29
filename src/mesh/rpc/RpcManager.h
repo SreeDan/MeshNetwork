@@ -2,7 +2,9 @@
 #include <atomic>
 #include <condition_variable>
 #include <expected>
+#include <functional>
 #include <thread>
+#include <unordered_set>
 #include "mesh/rpc/IRpcMessageHandler.h"
 #include "mesh/rpc/ITrasportLayer.h"
 #include "mesh/rpc/RpcConnection.h"
@@ -32,7 +34,18 @@ public:
 
     void set_sink(const std::shared_ptr<IMessageSink> &sink);
 
-    std::expected<std::string, std::string> connect(const std::string &host, int port);
+    std::expected<std::string, std::string> connect(
+        const std::string &host,
+        int port,
+        std::chrono::milliseconds timeout = std::chrono::seconds(5));
+
+    using ConnectCallback = std::function<void(std::expected<std::string, std::string>)>;
+
+    void connect_async(
+        const std::string &host,
+        int port,
+        std::chrono::milliseconds timeout,
+        ConnectCallback callback);
 
     void add_auto_connection(const mesh::PeerIP &record);
 
@@ -63,6 +76,7 @@ private:
     std::mutex mu_;
     std::unordered_map<std::string, std::shared_ptr<RpcConnection> > connections_by_peer_;
     std::unordered_map<std::string, std::shared_ptr<RpcConnection> > connections_by_ip_;
+    std::unordered_set<std::string> pending_connections_;
 
     std::vector<mesh::PeerIP> auto_connections_;
 
@@ -88,6 +102,8 @@ private:
 
     void do_accept();
 
-    std::expected<std::string, std::string> handle_connection_startup(std::shared_ptr<RpcConnection> conn,
-                                                                      bool initiator);
+    std::expected<std::string, std::string> handle_connection_startup(
+        std::shared_ptr<RpcConnection> conn,
+        bool initiator,
+        std::chrono::milliseconds timeout = std::chrono::seconds(5));
 };

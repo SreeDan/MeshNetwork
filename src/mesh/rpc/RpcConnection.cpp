@@ -50,7 +50,7 @@ void RpcConnection::shutdown() {
     pending_requests_.clear();
 }
 
-std::expected<mesh::PeerRecord, std::string> RpcConnection::start(bool initiator) {
+std::expected<mesh::PeerRecord, std::string> RpcConnection::start(bool initiator, std::chrono::milliseconds timeout) {
     auto self = shared_from_this();
     handshake_promise_ = std::make_shared<std::promise<std::expected<mesh::PeerRecord, std::string> > >();
     if (ssl_ctx_ == nullptr) {
@@ -68,11 +68,16 @@ std::expected<mesh::PeerRecord, std::string> RpcConnection::start(bool initiator
 
     if (initiator) {
         // If we are the initiator, we actively send and wait for a reply
-        return send_handshake_request();
+        return send_handshake_request(timeout);
     } else {
         // If we are the acceptor, we simply wait for the remote to send us a handshake
-        // This .get() blocks this thread until on_message sets the promise.
-        return handshake_promise_->get_future().get();
+        auto fut = handshake_promise_->get_future();
+        if (fut.wait_for(timeout) != std::future_status::ready) {
+            shutdown();
+            return std::unexpected("mesh handshake timed out");
+        }
+
+        return fut.get();
     }
 }
 
@@ -109,12 +114,12 @@ void RpcConnection::set_remote_peer_id(const std::string &peer_id) {
     authenticated_remote_id_ = peer_id;
 }
 
-std::expected<mesh::PeerRecord, std::string> RpcConnection::send_handshake_request() {
+std::expected<mesh::PeerRecord, std::string> RpcConnection::send_handshake_request(std::chrono::milliseconds timeout) {
     mesh::PeerIP local_ip = get_local_peer_ip();
     mesh::PeerIP remote_ip = get_remote_peer_ip();
 
     auto env = mesh::envelope::MakeHandshakeRequest(local_ip, remote_ip, peer_id_);
-    std::future<std::string> fut_response = send_message(env);
+    std::future<std::string> fut_response = send_message(env, timeout);
 
     try {
         std::string response = fut_response.get();
